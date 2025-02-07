@@ -39,8 +39,6 @@ func New(conn *ssh.ServerConn, sshChannel <-chan ssh.NewChannel, req <-chan *ssh
 		Done:          make(chan bool),
 	}
 
-	go session.handleGlobalRequest()
-
 	go func() {
 		for newChannel := range sshChannel {
 			go session.HandleSessionChannel(newChannel)
@@ -65,5 +63,4 @@ func (session *Session) Close() {
 	if err := session.Connection.Close(); err != nil {
 		fmt.Println("Error closing connection : ", err.Error())
 	}
-
 }

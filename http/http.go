@@ -2,72 +2,76 @@ package httpServer
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"tunnel_pls/session"
 )
 
 func Listen() {
-	server := http.Server{
-		Addr: ":80",
+	server, err := net.Listen("tcp", ":80")
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	defer server.Close()
+	log.Println("Listening on :80")
+	for {
+		conn, err := server.Accept()
+		if err != nil {
+			log.Fatal(err)
+			return
+		}
+
+		go handleRequest(conn)
+	}
+}
+
+func handleRequest(conn net.Conn) {
+	defer conn.Close()
+	var rawRequest string
+
+	reader := bufio.NewReader(conn)
+	r, err := http.ReadRequest(reader)
+	if err != nil {
+		fmt.Println("Error reading request:", err)
+		return
 	}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		var rawRequest string
-		slug := strings.Split(r.Host, ".")[0]
-		if slug == "" {
-			http.Error(w, "You fuck up man", http.StatusBadRequest)
-			return
-		}
-		sshSession, ok := session.Clients[slug]
-		if !ok {
-			http.Error(w, "Bad Gateway", http.StatusBadGateway)
-			return
-		}
-		rawRequest += fmt.Sprintf("%s %s %s\r\n", r.Method, r.URL.RequestURI(), r.Proto)
-		rawRequest += fmt.Sprintf("Host: %s\r\n", r.Host)
-		for k, v := range r.Header {
-			rawRequest += fmt.Sprintf("%s: %s\r\n", k, v[0])
-		}
-		rawRequest += "\r\n"
+	slug := strings.Split(r.Host, ".")[0]
+	if slug == "" {
+		fmt.Println("Error parsing slug: ", r.Host)
+		return
+	}
 
-		if r.Body != nil {
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				log.Println("Error reading request body:", err)
-			} else {
-				rawRequest += string(body)
-			}
-		}
-		payload := []byte(rawRequest)
+	sshSession, ok := session.Clients[slug]
+	if !ok {
+		fmt.Println("Error finding ssh session: ", slug)
+		return
+	}
 
-		host, originPort := session.ParseAddr(r.RemoteAddr)
-		data := sshSession.GetForwardedConnection(host, sshSession.Connection, payload, originPort, 80)
+	rawRequest += fmt.Sprintf("%s %s %s\r\n", r.Method, r.URL.RequestURI(), r.Proto)
+	rawRequest += fmt.Sprintf("Host: %s\r\n", r.Host)
 
-		response, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(data)), r)
+	for k, v := range r.Header {
+		rawRequest += fmt.Sprintf("%s: %s\r\n", k, v[0])
+	}
+	rawRequest += "\r\n"
+
+	if r.Body != nil {
+		body, err := io.ReadAll(r.Body)
 		if err != nil {
-			return
+			log.Println("Error reading request body:", err)
+		} else {
+			rawRequest += string(body)
 		}
-		var isServerSet = false
-		for k, v := range response.Header {
-			if k == "Server" {
-				isServerSet = true
-				w.Header().Set(k, fmt.Sprintf("Tunnel_Pls/%v", response.Header[k][0]))
-				continue
-			}
-			w.Header().Set(k, v[0])
-		}
-		if !isServerSet {
-			w.Header().Set("Server", "Tunnel_Pls")
-		}
-		w.WriteHeader(response.StatusCode)
-		io.Copy(w, response.Body)
-	})
+	}
 
-	fmt.Println("Listening on port 80")
-	server.ListenAndServe()
+	payload := []byte(rawRequest)
+
+	host, originPort := session.ParseAddr(conn.RemoteAddr().String())
+	sshSession.GetForwardedConnection(conn, host, sshSession.Connection, payload, originPort, 80)
 }

@@ -3,7 +3,6 @@ package session
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 	"strconv"
 	"time"
 	"tunnel_pls/proto"
+	"tunnel_pls/utils"
 )
 
 func (s *Session) handleGlobalRequest() {
@@ -45,12 +45,19 @@ func (s *Session) handleGlobalRequest() {
 
 				if portToBind == 80 || portToBind == 443 {
 					s.TunnelType = HTTP
-					Clients["test"] = s
-					// TODO: dont forward traffic to the listener below
+					var slug string
+					for {
+						slug = utils.GenerateRandomString(32)
+						if _, ok := Clients[slug]; ok {
+							continue
+						}
+						break
+					}
+					Clients[slug] = s
 					buf := new(bytes.Buffer)
 					binary.Write(buf, binary.BigEndian, uint32(portToBind))
-
 					log.Printf("Forwarding approved on port: %d", portToBind)
+					s.ConnChannels[0].Write([]byte(fmt.Sprintf("Forwarding your traffic to http://%s.tunnl.live", slug)))
 					req.Reply(true, buf.Bytes())
 				} else {
 					s.TunnelType = TCP
@@ -73,7 +80,7 @@ func (s *Session) handleGlobalRequest() {
 								log.Printf("Error accepting connection: %v", err)
 								continue
 							}
-							fmt.Println("ini bind : ", portToBind)
+
 							go s.HandleForwardedConnection(conn, s.Connection, portToBind)
 						}
 					}()
@@ -184,6 +191,7 @@ func (s *Session) HandleSessionChannel(newChannel ssh.NewChannel) {
 		}
 
 		connection.Write([]byte("\r\n\r\n"))
+		go s.handleGlobalRequest()
 
 		for req := range requests {
 			switch req.Type {
@@ -247,66 +255,35 @@ func (s *Session) HandleForwardedConnection(conn net.Conn, sshConn *ssh.ServerCo
 	}()
 }
 
-func (s *Session) GetForwardedConnection(host string, sshConn *ssh.ServerConn, payload []byte, originPort, port uint32) []byte {
-	fmt.Println("Here 1")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+func (s *Session) GetForwardedConnection(conn net.Conn, host string, sshConn *ssh.ServerConn, payload []byte, originPort, port uint32) {
+	defer conn.Close()
 	channelPayload := createForwardedTCPIPPayload(host, originPort, port)
 	channel, reqs, err := sshConn.OpenChannel("forwarded-tcpip", channelPayload)
 	if err != nil {
 		log.Printf("Failed to open forwarded-tcpip channel: %v", err)
-		return nil
+		return
 	}
-	fmt.Println("Here 2")
-
 	defer channel.Close()
 
-	head := bytes.NewReader(payload)
-	go io.Copy(channel, head)
-	fmt.Println("Here 3")
+	connReader := bufio.NewReader(conn)
+	initalPayload := bytes.NewReader(payload)
+	io.Copy(channel, initalPayload)
+	go io.Copy(channel, connReader)
 
+	reader := bufio.NewReader(channel)
+	_, err = reader.Peek(1)
+	if err == io.EOF {
+		io.Copy(conn, bytes.NewReader([]byte("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 11\r\nContent-Type: text/plain\r\n\r\nBad Gateway")))
+		s.ConnChannels[0].Write([]byte("Could not forward request to the tunnel addr\r\n"))
+		return
+	} else {
+		io.Copy(conn, reader)
+	}
 	go func() {
 		for req := range reqs {
 			req.Reply(false, nil)
 		}
 	}()
-	fmt.Println("Here 4")
-
-	var data bytes.Buffer
-	done := make(chan error, 1)
-	go func() {
-		io.Copy(&data, channel)
-		done <- err
-	}()
-	go func() {
-		var lastSize int
-		ticker := time.NewTicker(100)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				currentSize := data.Len()
-				fmt.Println("Size buffer:", currentSize)
-
-				if currentSize == lastSize && currentSize > 0 {
-					fmt.Println("Buffer size unchanged, closing channel...")
-					cancel()
-					return
-				}
-				lastSize = currentSize
-			}
-		}
-	}()
-	select {
-	case <-ctx.Done():
-		return data.Bytes()
-	case err = <-done:
-		return data.Bytes()
-	}
 }
 
 func writeSSHString(buffer *bytes.Buffer, str string) {
@@ -317,7 +294,7 @@ func writeSSHString(buffer *bytes.Buffer, str string) {
 func ParseAddr(addr string) (string, uint32) {
 	host, portStr, err := net.SplitHostPort(addr)
 	if err != nil {
-		log.Println("Failed to parse origin address:", err)
+		log.Printf("Failed to parse origin address: %s from address %s", err.Error(), addr)
 		return "0.0.0.0", uint32(0)
 	}
 	port, _ := strconv.Atoi(portStr)
