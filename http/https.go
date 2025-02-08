@@ -51,6 +51,7 @@ func handleRequestTLS(w http.ResponseWriter, r *http.Request) {
 	sshSession, ok := session.Clients[slug]
 	if !ok {
 		fmt.Println("Error finding ssh session: ", slug)
+		http.Error(w, "No tunnel found on this address", http.StatusNotFound)
 		return
 	}
 
