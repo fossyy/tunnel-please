@@ -8,15 +8,16 @@ import (
 )
 
 type Session struct {
-	ID            uuid.UUID
-	Slug          string
-	ConnChannels  []ssh.Channel
-	Connection    *ssh.ServerConn
-	GlobalRequest <-chan *ssh.Request
-	Listener      net.Listener
-	TunnelType    TunnelType
-	ForwardedPort uint16
-	Done          chan bool
+	ID               uuid.UUID
+	Slug             string
+	ConnChannels     []ssh.Channel
+	Connection       *ssh.ServerConn
+	GlobalRequest    <-chan *ssh.Request
+	Listener         net.Listener
+	TunnelType       TunnelType
+	ForwardedPort    uint16
+	Done             chan bool
+	ForwardedChannel ssh.Channel
 }
 
 type TunnelType string
