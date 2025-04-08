@@ -1,33 +1,8 @@
 package session
 
 import (
-	"fmt"
-	"github.com/google/uuid"
 	"golang.org/x/crypto/ssh"
-	"net"
 )
-
-type STATUS string
-
-const (
-	RUNNING STATUS = "running"
-	SETUP   STATUS = "setup"
-)
-
-type Session struct {
-	ID               uuid.UUID
-	Slug             string
-	Status           STATUS
-	ConnChannels     []ssh.Channel
-	Connection       *ssh.ServerConn
-	GlobalRequest    <-chan *ssh.Request
-	Listener         net.Listener
-	TunnelType       TunnelType
-	ForwardedPort    uint16
-	Done             chan bool
-	ForwardedChannel ssh.Channel
-	SlugChannel      chan bool
-}
 
 type TunnelType string
 
@@ -38,15 +13,8 @@ const (
 	UNKNOWN TunnelType = "unknown"
 )
 
-var Clients map[string]*Session
-
-func init() {
-	Clients = make(map[string]*Session)
-}
-
 func New(conn *ssh.ServerConn, sshChannel <-chan ssh.NewChannel, req <-chan *ssh.Request) *Session {
 	session := &Session{
-		ID:            uuid.New(),
 		Status:        SETUP,
 		Slug:          "",
 		ConnChannels:  []ssh.Channel{},
@@ -64,23 +32,4 @@ func New(conn *ssh.ServerConn, sshChannel <-chan ssh.NewChannel, req <-chan *ssh
 	}()
 
 	return session
-}
-
-func (session *Session) Close() {
-	session.Done <- true
-	if session.TunnelType != HTTP {
-		session.Listener.Close()
-	} else {
-		delete(Clients, session.Slug)
-	}
-
-	for _, ch := range session.ConnChannels {
-		if err := ch.Close(); err != nil {
-			fmt.Println("Error closing channel : ", err.Error())
-			continue
-		}
-	}
-	if err := session.Connection.Close(); err != nil {
-		fmt.Println("Error closing connection : ", err.Error())
-	}
 }

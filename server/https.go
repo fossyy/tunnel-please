@@ -43,9 +43,8 @@ func NewHTTPSServer() error {
 }
 
 func HandlerTLS(conn net.Conn) {
-	ctx, _ := context.WithDeadline(context.Background(), time.Now().Add(30*time.Second))
 	reader := bufio.NewReader(conn)
-	headers, err := peekUntilHeaders(reader, 512)
+	headers, err := peekUntilHeaders(reader, 8192)
 	if err != nil {
 		fmt.Println("Failed to peek headers:", err)
 		return
@@ -54,14 +53,12 @@ func HandlerTLS(conn net.Conn) {
 	host := strings.Split(parseHostFromHeader(headers), ".")
 	if len(host) < 1 {
 		conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
-		fmt.Println("Bad Request")
 		conn.Close()
 		return
 	}
 
 	if len(host) < 1 {
 		conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
-		fmt.Println("Bad Request")
 		conn.Close()
 		return
 	}
@@ -70,15 +67,26 @@ func HandlerTLS(conn net.Conn) {
 	sshSession, ok := session.Clients[slug]
 	if !ok {
 		conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
-		fmt.Println("Bad Request 1")
 		conn.Close()
 		return
+	}
+	keepalive, timeout := parseConnectionDetails(headers)
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if keepalive {
+		if timeout >= 300 {
+			timeout = 300
+		}
+		ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(time.Duration(timeout)*time.Second))
+	} else {
+		ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(5*time.Second))
 	}
 
 	sshSession.HandleForwardedConnection(session.UserConnection{
 		Reader:  reader,
 		Writer:  conn,
 		Context: ctx,
-	}, sshSession.Connection, 80)
+		Cancel:  cancel,
+	}, sshSession.Connection)
 	return
 }
