@@ -40,17 +40,6 @@ var (
 	Clients      = make(map[string]*Session)
 )
 
-type Session struct {
-	Connection    *ssh.ServerConn
-	ConnChannel   ssh.Channel
-	Listener      net.Listener
-	TunnelType    TunnelType
-	ForwardedPort uint16
-	Status        SessionStatus
-	Slug          string
-	Done          chan bool
-}
-
 func registerClient(slug string, session *Session) bool {
 	clientsMutex.Lock()
 	defer clientsMutex.Unlock()
@@ -113,28 +102,17 @@ func (s *Session) Close() {
 	close(s.Done)
 }
 
-func (s *Session) handleGlobalRequest(GlobalRequest <-chan *ssh.Request) {
-	ticker := time.NewTicker(1 * time.Second)
-	for {
-		select {
-		case req := <-GlobalRequest:
-			ticker.Stop()
-			if req == nil {
-				return
-			}
-			if req.Type == "tcpip-forward" {
-				s.handleTCPIPForward(req)
-			} else if req.Type == "shell" || req.Type == "pty-req" || req.Type == "window-change" {
-				req.Reply(true, nil)
-			} else {
-				req.Reply(false, nil)
-			}
-		case <-s.Done:
+func (s *Session) HandleGlobalRequest(GlobalRequest <-chan *ssh.Request) {
+	for req := range GlobalRequest {
+		switch req.Type {
+		case "tcpip-forward":
+			s.handleTCPIPForward(req)
 			return
-		case <-ticker.C:
-			s.sendMessage(fmt.Sprintf("Please specify the forwarding tunnel. For example: 'ssh %s -p %s -R 443:localhost:8080' \r\n\n\n", utils.Getenv("domain"), utils.Getenv("port")))
-			s.Close()
-			return
+		case "shell", "pty-req", "window-change":
+			req.Reply(true, nil)
+		default:
+			log.Println("Unknown request type:", req.Type)
+			req.Reply(false, nil)
 		}
 	}
 }
@@ -181,6 +159,7 @@ func (s *Session) handleTCPIPForward(req *ssh.Request) {
 
 	showWelcomeMessage(s.ConnChannel)
 	s.Status = RUNNING
+	go s.handleUserInput()
 
 	if portToBind == 80 || portToBind == 443 {
 		s.handleHTTPForward(req, portToBind)
@@ -338,29 +317,14 @@ func (s *Session) sendMessage(message string) {
 	}
 }
 
-func (s *Session) HandleSessionChannel(newChannel ssh.NewChannel, initialRequest <-chan *ssh.Request) {
-	connection, requests, err := newChannel.Accept()
-	if err != nil {
-		log.Printf("Could not accept channel: %s", err)
-		return
-	}
-
-	s.ConnChannel = connection
-	s.Status = RUNNING
-
-	go s.handleGlobalRequest(initialRequest)
-	go s.handleGlobalRequest(requests)
-	go s.handleUserInput(connection)
-}
-
-func (s *Session) handleUserInput(connection ssh.Channel) {
+func (s *Session) handleUserInput() {
 	var commandBuffer bytes.Buffer
 	buf := make([]byte, 1)
 	inSlugEditMode := false
 	editSlug := s.Slug
 
 	for {
-		n, err := connection.Read(buf)
+		n, err := s.ConnChannel.Read(buf)
 		if err != nil {
 			if err != io.EOF {
 				log.Printf("Error reading from client: %s", err)
@@ -372,16 +336,16 @@ func (s *Session) handleUserInput(connection ssh.Channel) {
 			char := buf[0]
 
 			if inSlugEditMode {
-				s.handleSlugEditMode(connection, &inSlugEditMode, &editSlug, char, &commandBuffer)
+				s.handleSlugEditMode(s.ConnChannel, &inSlugEditMode, &editSlug, char, &commandBuffer)
 				continue
 			}
 
-			connection.Write(buf[:n])
+			s.ConnChannel.Write(buf[:n])
 
 			if char == 8 || char == 127 {
 				if commandBuffer.Len() > 0 {
 					commandBuffer.Truncate(commandBuffer.Len() - 1)
-					connection.Write([]byte("\b \b"))
+					s.ConnChannel.Write([]byte("\b \b"))
 				}
 				continue
 			}
@@ -394,7 +358,7 @@ func (s *Session) handleUserInput(connection ssh.Channel) {
 
 			if commandBuffer.Len() > 0 {
 				if char == 13 {
-					s.handleCommand(connection, commandBuffer.String(), &inSlugEditMode, &editSlug, &commandBuffer)
+					s.handleCommand(s.ConnChannel, commandBuffer.String(), &inSlugEditMode, &editSlug, &commandBuffer)
 					continue
 				}
 				commandBuffer.WriteByte(char)

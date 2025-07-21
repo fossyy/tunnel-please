@@ -8,7 +8,7 @@ import (
 )
 
 func (s *Server) handleConnection(conn net.Conn) {
-	sshConn, chans, reqs, err := ssh.NewServerConn(conn, s.Config)
+	sshConn, chans, forwardingReqs, err := ssh.NewServerConn(conn, s.Config)
 	if err != nil {
 		log.Printf("failed to establish SSH connection: %v", err)
 		conn.Close()
@@ -17,5 +17,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 	log.Println("SSH connection established:", sshConn.User())
 
-	session.New(sshConn, chans, reqs)
+	newSession := session.New(sshConn, forwardingReqs)
+	for ch := range chans {
+		newSession.ChannelChan <- ch
+	}
+	return
 }
