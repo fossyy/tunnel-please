@@ -177,22 +177,6 @@ func (s *Session) handleTCPIPForward(req *ssh.Request) {
 		return
 	}
 
-	if portToBind == 0 {
-		unassign, success := portUtil.Manager.GetUnassignedPort()
-		portToBind = unassign
-		if !success {
-			s.sendMessage(fmt.Sprintf("No available port\r\n", portToBind))
-			req.Reply(false, nil)
-			s.Close()
-			return
-		}
-	} else if isUse, isExist := portUtil.Manager.GetPortStatus(portToBind); !isExist || isUse {
-		s.sendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (03)\r\n", portToBind))
-		req.Reply(false, nil)
-		s.Close()
-		return
-	}
-
 	s.sendMessage("\033[H\033[2J")
 
 	showWelcomeMessage(s.ConnChannel)
@@ -202,6 +186,21 @@ func (s *Session) handleTCPIPForward(req *ssh.Request) {
 		s.handleHTTPForward(req, portToBind)
 		return
 	} else {
+		if portToBind == 0 {
+			unassign, success := portUtil.Manager.GetUnassignedPort()
+			portToBind = unassign
+			if !success {
+				s.sendMessage(fmt.Sprintf("No available port\r\n", portToBind))
+				req.Reply(false, nil)
+				s.Close()
+				return
+			}
+		} else if isUse, isExist := portUtil.Manager.GetPortStatus(portToBind); !isExist || isUse {
+			s.sendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (03)\r\n", portToBind))
+			req.Reply(false, nil)
+			s.Close()
+			return
+		}
 		portUtil.Manager.SetPortStatus(portToBind, true)
 	}
 
