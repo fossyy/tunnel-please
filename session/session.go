@@ -3,6 +3,7 @@ package session
 import (
 	"golang.org/x/crypto/ssh"
 	"net"
+	"sync"
 )
 
 type TunnelType string
@@ -24,6 +25,7 @@ type Session struct {
 	Slug          string
 	ChannelChan   chan ssh.NewChannel
 	Done          chan bool
+	once          sync.Once
 }
 
 func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request) *Session {

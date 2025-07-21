@@ -4,11 +4,9 @@ import (
 	"bufio"
 	"crypto/tls"
 	"errors"
-	"golang.org/x/net/context"
 	"log"
 	"net"
 	"strings"
-	"time"
 	"tunnel_pls/session"
 	"tunnel_pls/utils"
 )
@@ -70,23 +68,10 @@ func HandlerTLS(conn net.Conn) {
 		conn.Close()
 		return
 	}
-	keepalive, timeout := parseConnectionDetails(headers)
-	var ctx context.Context
-	var cancel context.CancelFunc
-	if keepalive {
-		if timeout >= 300 {
-			timeout = 300
-		}
-		ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(time.Duration(timeout)*time.Second))
-	} else {
-		ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(5*time.Second))
-	}
 
 	sshSession.HandleForwardedConnection(session.UserConnection{
-		Reader:  reader,
-		Writer:  conn,
-		Context: ctx,
-		Cancel:  cancel,
+		Reader: reader,
+		Writer: conn,
 	}, sshSession.Connection)
 	return
 }
