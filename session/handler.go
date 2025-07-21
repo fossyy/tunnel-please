@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	portUtil "tunnel_pls/internal/port"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/net/context"
@@ -105,6 +106,10 @@ func (s *Session) Close() {
 		unregisterClient(s.Slug)
 	}
 
+	if s.TunnelType == TCP {
+		portUtil.Manager.SetPortStatus(s.ForwardedPort, false)
+	}
+
 	close(s.Done)
 }
 
@@ -147,41 +152,69 @@ func (s *Session) handleTCPIPForward(req *ssh.Request) {
 		return
 	}
 
-	var portToBind uint32
-	if err := binary.Read(reader, binary.BigEndian, &portToBind); err != nil {
+	var rawPortToBind uint32
+	if err := binary.Read(reader, binary.BigEndian, &rawPortToBind); err != nil {
 		log.Println("Failed to read port from payload:", err)
-		s.sendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port.\r\n", portToBind))
+		s.sendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (02) \r\n", rawPortToBind))
 		req.Reply(false, nil)
 		s.Close()
 		return
 	}
 
+	if rawPortToBind > 65535 {
+		s.sendMessage(fmt.Sprintf("Port %d is larger then allowed port of 65535. (02)\r\n", rawPortToBind))
+		req.Reply(false, nil)
+		s.Close()
+		return
+	}
+
+	portToBind := uint16(rawPortToBind)
+
 	if isBlockedPort(portToBind) {
-		s.sendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port.\r\n", portToBind))
+		s.sendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (02)\r\n", portToBind))
+		req.Reply(false, nil)
+		s.Close()
+		return
+	}
+
+	if portToBind == 0 {
+		unassign, success := portUtil.Manager.GetUnassignedPort()
+		portToBind = unassign
+		if !success {
+			s.sendMessage(fmt.Sprintf("No available port\r\n", portToBind))
+			req.Reply(false, nil)
+			s.Close()
+			return
+		}
+	} else if isUse, isExist := portUtil.Manager.GetPortStatus(portToBind); !isExist || isUse {
+		s.sendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (03)\r\n", portToBind))
 		req.Reply(false, nil)
 		s.Close()
 		return
 	}
 
 	s.sendMessage("\033[H\033[2J")
+
 	showWelcomeMessage(s.ConnChannel)
 	s.Status = RUNNING
 
 	if portToBind == 80 || portToBind == 443 {
 		s.handleHTTPForward(req, portToBind)
 		return
+	} else {
+		portUtil.Manager.SetPortStatus(portToBind, true)
 	}
 
 	s.handleTCPForward(req, addr, portToBind)
 }
 
-var blockedReservedPorts = []uint32{1080, 1433, 1521, 1900, 2049, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 9000, 9200, 27017}
+var blockedReservedPorts = []uint16{1080, 1433, 1521, 1900, 2049, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 9000, 9200, 27017}
 
-func isBlockedPort(port uint32) bool {
+func isBlockedPort(port uint16) bool {
 	if port == 80 || port == 443 {
 		return false
 	}
-	if port < 1024 {
+	if port < 1024 && port != 0 {
 		return true
 	}
 	for _, p := range blockedReservedPorts {
@@ -192,7 +225,7 @@ func isBlockedPort(port uint32) bool {
 	return false
 }
 
-func (s *Session) handleHTTPForward(req *ssh.Request, portToBind uint32) {
+func (s *Session) handleHTTPForward(req *ssh.Request, portToBind uint16) {
 	s.TunnelType = HTTP
 	s.ForwardedPort = uint16(portToBind)
 
@@ -221,7 +254,7 @@ func (s *Session) handleHTTPForward(req *ssh.Request, portToBind uint32) {
 	req.Reply(true, buf.Bytes())
 }
 
-func (s *Session) handleTCPForward(req *ssh.Request, addr string, portToBind uint32) {
+func (s *Session) handleTCPForward(req *ssh.Request, addr string, portToBind uint16) {
 	s.TunnelType = TCP
 	log.Printf("Requested forwarding on %s:%d", addr, portToBind)
 
