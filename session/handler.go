@@ -3,6 +3,7 @@ package session
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -13,9 +14,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	portUtil "tunnel_pls/internal/port"
 
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/net/context"
 	"tunnel_pls/utils"
 )
 
@@ -28,29 +29,14 @@ const (
 )
 
 type UserConnection struct {
-	Reader  io.Reader
-	Writer  net.Conn
-	Context context.Context
-	Cancel  context.CancelFunc
+	Reader io.Reader
+	Writer net.Conn
 }
 
 var (
 	clientsMutex sync.RWMutex
 	Clients      = make(map[string]*Session)
 )
-
-type Session struct {
-	Connection    *ssh.ServerConn
-	ConnChannels  []ssh.Channel
-	GlobalRequest <-chan *ssh.Request
-	Listener      net.Listener
-	TunnelType    TunnelType
-	ForwardedPort uint16
-	Status        SessionStatus
-	Slug          string
-	SlugChannel   chan bool
-	Done          chan bool
-}
 
 func registerClient(slug string, session *Session) bool {
 	clientsMutex.Lock()
@@ -90,45 +76,66 @@ func updateClientSlug(oldSlug, newSlug string) bool {
 	return true
 }
 
-func (s *Session) Close() {
+func (s *Session) safeClose() {
+	s.once.Do(func() {
+		close(s.ChannelChan)
+		close(s.Done)
+	})
+}
+
+func (s *Session) Close() error {
 	if s.Listener != nil {
-		s.Listener.Close()
+		err := s.Listener.Close()
+		if err != nil && !errors.Is(err, net.ErrClosed) {
+			fmt.Println("1")
+			return err
+		}
 	}
 
-	for _, ch := range s.ConnChannels {
-		ch.Close()
+	if s.ConnChannel != nil {
+		err := s.ConnChannel.Close()
+		if err != nil && !errors.Is(err, io.EOF) {
+			fmt.Println("2")
+			return err
+		}
 	}
 
 	if s.Connection != nil {
-		s.Connection.Close()
+		err := s.Connection.Close()
+		if err != nil && !errors.Is(err, net.ErrClosed) {
+			fmt.Println("3")
+
+			return err
+		}
 	}
 
 	if s.Slug != "" {
 		unregisterClient(s.Slug)
 	}
 
-	close(s.Done)
+	if s.TunnelType == TCP {
+		err := portUtil.Manager.SetPortStatus(s.ForwardedPort, false)
+		if err != nil {
+			fmt.Println("4")
+			return err
+		}
+	}
+
+	s.safeClose()
+	return nil
 }
 
-func (s *Session) handleGlobalRequest() {
-	ticker := time.NewTicker(1 * time.Second)
-	for {
-		select {
-		case req := <-s.GlobalRequest:
-			ticker.Stop()
-			if req == nil {
-				return
-			}
-			if req.Type == "tcpip-forward" {
-				s.handleTCPIPForward(req)
-			} else {
-				req.Reply(false, nil)
-			}
-		case <-s.Done:
+func (s *Session) HandleGlobalRequest(GlobalRequest <-chan *ssh.Request) {
+	for req := range GlobalRequest {
+		switch req.Type {
+		case "tcpip-forward":
+			s.handleTCPIPForward(req)
 			return
-		case <-ticker.C:
-			s.sendMessage(fmt.Sprintf("Please specify the forwarding tunnel. For example: 'ssh %s -p %s -R 443:localhost:8080' \r\n\n\n", utils.Getenv("domain"), utils.Getenv("port")))
-			s.Close()
+		case "shell", "pty-req", "window-change":
+			req.Reply(true, nil)
+		default:
+			log.Println("Unknown request type:", req.Type)
+			req.Reply(false, nil)
 		}
 	}
 }
@@ -146,41 +153,69 @@ func (s *Session) handleTCPIPForward(req *ssh.Request) {
 		return
 	}
 
-	var portToBind uint32
-	if err := binary.Read(reader, binary.BigEndian, &portToBind); err != nil {
+	var rawPortToBind uint32
+	if err := binary.Read(reader, binary.BigEndian, &rawPortToBind); err != nil {
 		log.Println("Failed to read port from payload:", err)
-		s.sendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port.\r\n", portToBind))
+		s.sendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (02) \r\n", rawPortToBind))
 		req.Reply(false, nil)
 		s.Close()
 		return
 	}
 
+	if rawPortToBind > 65535 {
+		s.sendMessage(fmt.Sprintf("Port %d is larger then allowed port of 65535. (02)\r\n", rawPortToBind))
+		req.Reply(false, nil)
+		s.Close()
+		return
+	}
+
+	portToBind := uint16(rawPortToBind)
+
 	if isBlockedPort(portToBind) {
-		s.sendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port.\r\n", portToBind))
+		s.sendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (02)\r\n", portToBind))
 		req.Reply(false, nil)
 		s.Close()
 		return
 	}
 
 	s.sendMessage("\033[H\033[2J")
-	showWelcomeMessage(s.ConnChannels[0])
+
+	showWelcomeMessage(s.ConnChannel)
 	s.Status = RUNNING
+	go s.handleUserInput()
 
 	if portToBind == 80 || portToBind == 443 {
 		s.handleHTTPForward(req, portToBind)
 		return
+	} else {
+		if portToBind == 0 {
+			unassign, success := portUtil.Manager.GetUnassignedPort()
+			portToBind = unassign
+			if !success {
+				s.sendMessage(fmt.Sprintf("No available port\r\n", portToBind))
+				req.Reply(false, nil)
+				s.Close()
+				return
+			}
+		} else if isUse, isExist := portUtil.Manager.GetPortStatus(portToBind); !isExist || isUse {
+			s.sendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (03)\r\n", portToBind))
+			req.Reply(false, nil)
+			s.Close()
+			return
+		}
+		portUtil.Manager.SetPortStatus(portToBind, true)
 	}
 
 	s.handleTCPForward(req, addr, portToBind)
 }
 
-var blockedReservedPorts = []uint32{1080, 1433, 1521, 1900, 2049, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 9000, 9200, 27017}
+var blockedReservedPorts = []uint16{1080, 1433, 1521, 1900, 2049, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 9000, 9200, 27017}
 
-func isBlockedPort(port uint32) bool {
+func isBlockedPort(port uint16) bool {
 	if port == 80 || port == 443 {
 		return false
 	}
-	if port < 1024 {
+	if port < 1024 && port != 0 {
 		return true
 	}
 	for _, p := range blockedReservedPorts {
@@ -191,7 +226,7 @@ func isBlockedPort(port uint32) bool {
 	return false
 }
 
-func (s *Session) handleHTTPForward(req *ssh.Request, portToBind uint32) {
+func (s *Session) handleHTTPForward(req *ssh.Request, portToBind uint16) {
 	s.TunnelType = HTTP
 	s.ForwardedPort = uint16(portToBind)
 
@@ -220,7 +255,7 @@ func (s *Session) handleHTTPForward(req *ssh.Request, portToBind uint32) {
 	req.Reply(true, buf.Bytes())
 }
 
-func (s *Session) handleTCPForward(req *ssh.Request, addr string, portToBind uint32) {
+func (s *Session) handleTCPForward(req *ssh.Request, addr string, portToBind uint16) {
 	s.TunnelType = TCP
 	log.Printf("Requested forwarding on %s:%d", addr, portToBind)
 
@@ -255,9 +290,8 @@ func (s *Session) acceptTCPConnections() {
 		}
 
 		go s.HandleForwardedConnection(UserConnection{
-			Reader:  nil,
-			Writer:  conn,
-			Context: context.Background(),
+			Reader: nil,
+			Writer: conn,
 		}, s.Connection)
 	}
 }
@@ -300,33 +334,19 @@ func (s *Session) waitForRunningStatus() {
 }
 
 func (s *Session) sendMessage(message string) {
-	if len(s.ConnChannels) > 0 {
-		s.ConnChannels[0].Write([]byte(message))
+	if s.ConnChannel != nil {
+		s.ConnChannel.Write([]byte(message))
 	}
 }
 
-func (s *Session) HandleSessionChannel(newChannel ssh.NewChannel) {
-	connection, requests, err := newChannel.Accept()
-	if err != nil {
-		log.Printf("Could not accept channel: %s", err)
-		return
-	}
-
-	s.ConnChannels = append(s.ConnChannels, connection)
-
-	go s.handleUserInput(connection)
-
-	go s.handleChannelRequests(connection, requests)
-}
-
-func (s *Session) handleUserInput(connection ssh.Channel) {
+func (s *Session) handleUserInput() {
 	var commandBuffer bytes.Buffer
 	buf := make([]byte, 1)
 	inSlugEditMode := false
 	editSlug := s.Slug
 
 	for {
-		n, err := connection.Read(buf)
+		n, err := s.ConnChannel.Read(buf)
 		if err != nil {
 			if err != io.EOF {
 				log.Printf("Error reading from client: %s", err)
@@ -338,16 +358,16 @@ func (s *Session) handleUserInput(connection ssh.Channel) {
 			char := buf[0]
 
 			if inSlugEditMode {
-				s.handleSlugEditMode(connection, &inSlugEditMode, &editSlug, char, &commandBuffer)
+				s.handleSlugEditMode(s.ConnChannel, &inSlugEditMode, &editSlug, char, &commandBuffer)
 				continue
 			}
 
-			connection.Write(buf[:n])
+			s.ConnChannel.Write(buf[:n])
 
 			if char == 8 || char == 127 {
 				if commandBuffer.Len() > 0 {
 					commandBuffer.Truncate(commandBuffer.Len() - 1)
-					connection.Write([]byte("\b \b"))
+					s.ConnChannel.Write([]byte("\b \b"))
 				}
 				continue
 			}
@@ -360,7 +380,7 @@ func (s *Session) handleUserInput(connection ssh.Channel) {
 
 			if commandBuffer.Len() > 0 {
 				if char == 13 {
-					s.handleCommand(connection, commandBuffer.String(), &inSlugEditMode, &editSlug, &commandBuffer)
+					s.handleCommand(s.ConnChannel, commandBuffer.String(), &inSlugEditMode, &editSlug, &commandBuffer)
 					continue
 				}
 				commandBuffer.WriteByte(char)
@@ -494,7 +514,7 @@ func (s *Session) handleCommand(connection ssh.Channel, command string, inSlugEd
 		connection.Write([]byte("\r\nAvailable commands: /bye, /help, /clear, /slug"))
 	case "/clear":
 		connection.Write([]byte("\033[H\033[2J"))
-		showWelcomeMessage(s.ConnChannels[0])
+		showWelcomeMessage(s.ConnChannel)
 		domain := utils.Getenv("domain")
 		if s.TunnelType == HTTP {
 			protocol := "http"
@@ -523,20 +543,6 @@ func (s *Session) handleCommand(connection ssh.Channel, command string, inSlugEd
 	commandBuffer.Reset()
 }
 
-func (s *Session) handleChannelRequests(connection ssh.Channel, requests <-chan *ssh.Request) {
-	go s.handleGlobalRequest()
-
-	for req := range requests {
-		switch req.Type {
-		case "shell", "pty-req", "window-change":
-			req.Reply(true, nil)
-		default:
-			log.Println("Unknown request type:", req.Type)
-			req.Reply(false, nil)
-		}
-	}
-}
-
 func (s *Session) HandleForwardedConnection(conn UserConnection, sshConn *ssh.ServerConn) {
 	defer conn.Writer.Close()
 
@@ -554,45 +560,74 @@ func (s *Session) HandleForwardedConnection(conn UserConnection, sshConn *ssh.Se
 	}
 	defer channel.Close()
 
-	go handleChannelRequests(reqs, conn, channel, s.SlugChannel)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Panic in request handler: %v", r)
+			}
+		}()
+		for req := range reqs {
+			req.Reply(false, nil)
+		}
+	}()
 
 	if conn.Reader == nil {
 		conn.Reader = bufio.NewReader(conn.Writer)
 	}
 
-	go io.Copy(channel, conn.Reader)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Panic in reader copy: %v", r)
+			}
+			cancel()
+		}()
+
+		_, err := io.Copy(channel, conn.Reader)
+		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+			log.Printf("Error copying from conn.Reader to channel: %v", err)
+		}
+		cancel()
+	}()
 
 	reader := bufio.NewReader(channel)
-	_, err = reader.Peek(1)
-	if err == io.EOF {
-		s.sendMessage(fmt.Sprintf("\033[33m%s -> [%s] WARNING -- \"%s\"\033[0m\r\n", conn.Writer.RemoteAddr().String(), s.TunnelType, "Could not forward request to the tunnel addr"))
+
+	peekChan := make(chan error, 1)
+	go func() {
+		_, err := reader.Peek(1)
+		peekChan <- err
+	}()
+
+	select {
+	case err := <-peekChan:
+		if err == io.EOF {
+			s.sendMessage(fmt.Sprintf("\033[33m%s -> [%s] WARNING -- \"Could not forward request to the tunnel addr\"\033[0m\r\n", conn.Writer.RemoteAddr().String(), s.TunnelType))
+			sendBadGatewayResponse(conn.Writer)
+			return
+		}
+		if err != nil {
+			log.Printf("Error peeking channel data: %v", err)
+			s.sendMessage(fmt.Sprintf("\033[33m%s -> [%s] WARNING -- \"Could not forward request to the tunnel addr\"\033[0m\r\n", conn.Writer.RemoteAddr().String(), s.TunnelType))
+			sendBadGatewayResponse(conn.Writer)
+			return
+		}
+	case <-time.After(5 * time.Second):
+		log.Printf("Timeout waiting for channel data from %s", conn.Writer.RemoteAddr())
+		s.sendMessage(fmt.Sprintf("\033[33m%s -> [%s] WARNING -- \"Could not forward request to the tunnel addr\"\033[0m\r\n", conn.Writer.RemoteAddr().String(), s.TunnelType))
 		sendBadGatewayResponse(conn.Writer)
-		conn.Writer.Close()
-		channel.Close()
+		return
+	case <-ctx.Done():
 		return
 	}
 
-	s.sendMessage(fmt.Sprintf("\033[32m %s -> [%s] TUNNEL ADDRESS -- \"%s\" \r\n \033[0m", conn.Writer.RemoteAddr().String(), s.TunnelType, timestamp))
+	s.sendMessage(fmt.Sprintf("\033[32m%s -> [%s] TUNNEL ADDRESS -- \"%s\"\033[0m\r\n", conn.Writer.RemoteAddr().String(), s.TunnelType, timestamp))
 
-	io.Copy(conn.Writer, reader)
-}
-
-func handleChannelRequests(reqs <-chan *ssh.Request, conn UserConnection, channel ssh.Channel, slugChannel <-chan bool) {
-	select {
-	case <-reqs:
-		for req := range reqs {
-			req.Reply(false, nil)
-		}
-	case <-conn.Context.Done():
-		conn.Writer.Close()
-		channel.Close()
-		log.Println("Connection closed by timeout")
-		return
-	case <-slugChannel:
-		conn.Writer.Close()
-		channel.Close()
-		log.Println("Connection closed by slug change")
-		return
+	_, err = io.Copy(conn.Writer, reader)
+	if err != nil && !errors.Is(err, io.EOF) {
+		log.Printf("Error copying from channel to conn.Writer: %v", err)
 	}
 }
 

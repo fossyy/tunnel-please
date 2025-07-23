@@ -5,17 +5,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"golang.org/x/net/context"
 	"log"
 	"net"
-	"strconv"
 	"strings"
-	"time"
 	"tunnel_pls/session"
 	"tunnel_pls/utils"
 )
 
-var redirectTLS bool = false
+var redirectTLS = false
 
 func NewHTTPServer() error {
 	listener, err := net.Listen("tcp", ":80")
@@ -81,23 +78,10 @@ func Handler(conn net.Conn) {
 		conn.Close()
 		return
 	}
-	keepalive, timeout := parseConnectionDetails(headers)
-	var ctx context.Context
-	var cancel context.CancelFunc
-	if keepalive {
-		if timeout >= 300 {
-			timeout = 300
-		}
-		ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(time.Duration(timeout)*time.Second))
-	} else {
-		ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(5*time.Second))
-	}
 
 	sshSession.HandleForwardedConnection(session.UserConnection{
-		Reader:  reader,
-		Writer:  conn,
-		Context: ctx,
-		Cancel:  cancel,
+		Reader: reader,
+		Writer: conn,
 	}, sshSession.Connection)
 	return
 }
@@ -130,43 +114,4 @@ func parseHostFromHeader(data []byte) string {
 		}
 	}
 	return ""
-}
-
-func parseConnectionDetails(data []byte) (keepAlive bool, timeout int) {
-	keepAlive = false
-	timeout = 30
-
-	lines := strings.Split(string(data), "\r\n")
-
-	for _, line := range lines {
-		if strings.HasPrefix(strings.ToLower(line), "connection:") {
-			value := strings.TrimSpace(strings.TrimPrefix(strings.ToLower(line), "connection:"))
-			keepAlive = (value == "keep-alive")
-			break
-		}
-	}
-
-	if keepAlive {
-		for _, line := range lines {
-			if strings.HasPrefix(strings.ToLower(line), "keep-alive:") {
-				value := strings.TrimSpace(strings.TrimPrefix(line, "Keep-Alive:"))
-
-				if strings.Contains(value, "timeout=") {
-					parts := strings.Split(value, ",")
-					for _, part := range parts {
-						part = strings.TrimSpace(part)
-						if strings.HasPrefix(part, "timeout=") {
-							timeoutStr := strings.TrimPrefix(part, "timeout=")
-							if t, err := strconv.Atoi(timeoutStr); err == nil {
-								timeout = t
-							}
-						}
-					}
-				}
-				break
-			}
-		}
-	}
-
-	return keepAlive, timeout
 }
