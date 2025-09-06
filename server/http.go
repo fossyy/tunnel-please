@@ -61,6 +61,7 @@ func (w *connResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 var redirectTLS = false
 
 func NewHTTPServer() error {
+	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 	listener, err := net.Listen("tcp", ":80")
 	if err != nil {
 		return errors.New("Error listening: " + err.Error())
