@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -101,7 +102,11 @@ func HandlerTLS(conn net.Conn) {
 
 	sshSession, ok := session.Clients[slug]
 	if !ok {
-		conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
+		conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
+			fmt.Sprintf("Location: https://%s/tunnel-not-found?slug=%s\r\n", utils.Getenv("domain"), slug) +
+			"Content-Length: 0\r\n" +
+			"Connection: close\r\n" +
+			"\r\n"))
 		conn.Close()
 		return
 	}
