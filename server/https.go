@@ -59,11 +59,6 @@ func HandlerTLS(conn net.Conn) {
 		return
 	}
 
-	if len(host) < 1 {
-		conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
-		conn.Close()
-		return
-	}
 	slug := host[0]
 
 	if slug == "ping" {
