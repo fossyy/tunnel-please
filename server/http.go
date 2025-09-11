@@ -59,9 +59,33 @@ func (w *connResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 }
 
 var redirectTLS = false
+var allowedCors = make(map[string]bool)
+var isAllowedAllCors = false
+
+func init() {
+	corsList := utils.Getenv("cors_list")
+	if corsList == "*" {
+		isAllowedAllCors = true
+	} else {
+		for _, allowedOrigin := range strings.Split(corsList, ",") {
+			allowedCors[allowedOrigin] = true
+		}
+	}
+}
 
 func NewHTTPServer() error {
-	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
+	upgrader.CheckOrigin = func(r *http.Request) bool {
+		if isAllowedAllCors {
+			return true
+		} else {
+			isAllowed, ok := allowedCors[r.Header.Get("Origin")]
+			if !ok || !isAllowed {
+				return false
+			}
+			return true
+		}
+	}
+
 	listener, err := net.Listen("tcp", ":80")
 	if err != nil {
 		return errors.New("Error listening: " + err.Error())
@@ -97,16 +121,10 @@ func Handler(conn net.Conn) {
 	host := strings.Split(parseHostFromHeader(headers), ".")
 	if len(host) < 1 {
 		conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
-		log.Println("Bad Request")
 		conn.Close()
 		return
 	}
 
-	if len(host) < 1 {
-		conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
-		conn.Close()
-		return
-	}
 	slug := host[0]
 
 	if redirectTLS {
@@ -155,7 +173,11 @@ func Handler(conn net.Conn) {
 
 	sshSession, ok := session.Clients[slug]
 	if !ok {
-		conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
+		conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
+			fmt.Sprintf("Location: https://tunnl.live/tunnel-not-found?slug=%s\r\n", slug) +
+			"Content-Length: 0\r\n" +
+			"Connection: close\r\n" +
+			"\r\n"))
 		conn.Close()
 		return
 	}

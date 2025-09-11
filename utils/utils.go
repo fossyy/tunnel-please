@@ -1,13 +1,14 @@
 package utils
 
 import (
-	"github.com/joho/godotenv"
 	"log"
 	"math/rand"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 type Env struct {
