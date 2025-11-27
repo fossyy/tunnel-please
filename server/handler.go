@@ -1,10 +1,11 @@
 package server
 
 import (
-	"golang.org/x/crypto/ssh"
 	"log"
 	"net"
 	"tunnel_pls/session"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func (s *Server) handleConnection(conn net.Conn) {
@@ -21,16 +22,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 	log.Println("SSH connection established:", sshConn.User())
 
-	newSession := session.New(sshConn, forwardingReqs)
-	for ch := range chans {
-		newSession.ChannelChan <- ch
-	}
+	session.New(sshConn, forwardingReqs, chans)
 
-	defer func(newSession *session.Session) {
-		err := newSession.Close()
-		if err != nil {
-			log.Printf("failed to close session: %v", err)
-		}
-	}(newSession)
 	return
 }
