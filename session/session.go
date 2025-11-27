@@ -1,9 +1,16 @@
 package session
 
 import (
-	"golang.org/x/crypto/ssh"
+	"log"
 	"net"
-	"sync"
+
+	"golang.org/x/crypto/ssh"
+)
+
+const (
+	INITIALIZING SessionStatus = "INITIALIZING"
+	RUNNING      SessionStatus = "RUNNING"
+	SETUP        SessionStatus = "SETUP"
 )
 
 type TunnelType string
@@ -11,7 +18,6 @@ type TunnelType string
 const (
 	HTTP    TunnelType = "http"
 	TCP     TunnelType = "tcp"
-	UDP     TunnelType = "udp"
 	UNKNOWN TunnelType = "unknown"
 )
 
@@ -23,33 +29,32 @@ type Session struct {
 	ForwardedPort uint16
 	Status        SessionStatus
 	Slug          string
-	ChannelChan   chan ssh.NewChannel
-	Done          chan bool
-	once          sync.Once
 }
 
-func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request) *Session {
+func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel) {
 	session := &Session{
-		Status:      SETUP,
+		Status:      INITIALIZING,
 		Slug:        "",
 		ConnChannel: nil,
 		Connection:  conn,
 		TunnelType:  UNKNOWN,
-		ChannelChan: make(chan ssh.NewChannel),
-		Done:        make(chan bool),
 	}
 
 	go func() {
-		for channel := range session.ChannelChan {
+		go session.waitForRunningStatus()
+
+		for channel := range sshChan {
 			ch, reqs, _ := channel.Accept()
 			if session.ConnChannel == nil {
 				session.ConnChannel = ch
-				session.Status = RUNNING
+				session.Status = SETUP
 				go session.HandleGlobalRequest(forwardingReq)
 			}
 			go session.HandleGlobalRequest(reqs)
 		}
+		err := session.Close()
+		if err != nil {
+			log.Printf("failed to close session: %v", err)
+		}
 	}()
-
-	return session
 }
