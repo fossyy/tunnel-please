@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	portUtil "tunnel_pls/internal/port"
@@ -35,6 +36,71 @@ var (
 	clientsMutex sync.RWMutex
 	Clients      = make(map[string]*SSHSession)
 )
+
+type HeaderModifier struct {
+	r          io.Reader
+	headerBuf  []byte
+	headerDone bool
+	state      int
+}
+
+func (hm *HeaderModifier) Read(p []byte) (int, error) {
+	n, err := hm.r.Read(p)
+	if n > 0 && !hm.headerDone {
+		for i := 0; i < n; i++ {
+			b := p[i]
+			hm.headerBuf = append(hm.headerBuf, b)
+
+			switch hm.state {
+			case 0:
+				if b == '\r' {
+					hm.state = 1
+				}
+			case 1:
+				if b == '\n' {
+					hm.state = 2
+				} else {
+					hm.state = 0
+				}
+			case 2:
+				if b == '\r' {
+					hm.state = 3
+				} else {
+					hm.state = 0
+				}
+			case 3:
+				if b == '\n' {
+					hm.headerDone = true
+					modifiedHeader := hm.modifyHeader(hm.headerBuf)
+					copy(p, modifiedHeader)
+					return len(modifiedHeader), nil
+				} else {
+					hm.state = 0
+				}
+			}
+		}
+	}
+
+	return n, err
+}
+func (hm *HeaderModifier) modifyHeader(header []byte) []byte {
+	lines := strings.Split(string(header), "\r\n")
+	found := false
+
+	for i, line := range lines {
+		if strings.HasPrefix(strings.ToLower(line), "server:") {
+			lines[i] = "Server: tunnel_please"
+			found = true
+		}
+	}
+
+	if !found {
+		lines = append(lines[:len(lines)-2], "Server: tunnel_please", "", "")
+	}
+
+	modified := strings.Join(lines, "\r\n")
+	return []byte(modified)
+}
 
 func registerClient(slug string, session *SSHSession) bool {
 	clientsMutex.Lock()
@@ -99,10 +165,18 @@ func (s *SSHSession) HandleGlobalRequest(GlobalRequest <-chan *ssh.Request) {
 			s.handleTCPIPForward(req)
 			return
 		case "shell", "pty-req", "window-change":
-			req.Reply(true, nil)
+			err := req.Reply(true, nil)
+			if err != nil {
+				log.Println("Failed to reply to request:", err)
+				return
+			}
 		default:
 			log.Println("Unknown request type:", req.Type)
-			req.Reply(false, nil)
+			err := req.Reply(false, nil)
+			if err != nil {
+				log.Println("Failed to reply to request:", err)
+				return
+			}
 		}
 	}
 }
@@ -115,8 +189,12 @@ func (s *SSHSession) handleTCPIPForward(req *ssh.Request) {
 	addr, err := readSSHString(reader)
 	if err != nil {
 		log.Println("Failed to read address from payload:", err)
-		req.Reply(false, nil)
-		err := s.Close()
+		err := req.Reply(false, nil)
+		if err != nil {
+			log.Println("Failed to reply to request:", err)
+			return
+		}
+		err = s.Close()
 		if err != nil {
 			log.Printf("failed to close session: %v", err)
 		}
@@ -127,8 +205,12 @@ func (s *SSHSession) handleTCPIPForward(req *ssh.Request) {
 	if err := binary.Read(reader, binary.BigEndian, &rawPortToBind); err != nil {
 		log.Println("Failed to read port from payload:", err)
 		s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (02) \r\n", rawPortToBind))
-		req.Reply(false, nil)
-		err := s.Close()
+		err := req.Reply(false, nil)
+		if err != nil {
+			log.Println("Failed to reply to request:", err)
+			return
+		}
+		err = s.Close()
 		if err != nil {
 			log.Printf("failed to close session: %v", err)
 		}
@@ -137,8 +219,12 @@ func (s *SSHSession) handleTCPIPForward(req *ssh.Request) {
 
 	if rawPortToBind > 65535 {
 		s.interaction.SendMessage(fmt.Sprintf("Port %d is larger then allowed port of 65535. (02)\r\n", rawPortToBind))
-		req.Reply(false, nil)
-		err := s.Close()
+		err := req.Reply(false, nil)
+		if err != nil {
+			log.Println("Failed to reply to request:", err)
+			return
+		}
+		err = s.Close()
 		if err != nil {
 			log.Printf("failed to close session: %v", err)
 		}
@@ -149,8 +235,12 @@ func (s *SSHSession) handleTCPIPForward(req *ssh.Request) {
 
 	if isBlockedPort(portToBind) {
 		s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (02)\r\n", portToBind))
-		req.Reply(false, nil)
-		err := s.Close()
+		err := req.Reply(false, nil)
+		if err != nil {
+			log.Println("Failed to reply to request:", err)
+			return
+		}
+		err = s.Close()
 		if err != nil {
 			log.Printf("failed to close session: %v", err)
 		}
@@ -170,8 +260,12 @@ func (s *SSHSession) handleTCPIPForward(req *ssh.Request) {
 			portToBind = unassign
 			if !success {
 				s.interaction.SendMessage(fmt.Sprintf("No available port\r\n", portToBind))
-				req.Reply(false, nil)
-				err := s.Close()
+				err := req.Reply(false, nil)
+				if err != nil {
+					log.Println("Failed to reply to request:", err)
+					return
+				}
+				err = s.Close()
 				if err != nil {
 					log.Printf("failed to close session: %v", err)
 				}
@@ -179,14 +273,22 @@ func (s *SSHSession) handleTCPIPForward(req *ssh.Request) {
 			}
 		} else if isUse, isExist := portUtil.Manager.GetPortStatus(portToBind); isExist || isUse {
 			s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (03)\r\n", portToBind))
-			req.Reply(false, nil)
-			err := s.Close()
+			err := req.Reply(false, nil)
+			if err != nil {
+				log.Println("Failed to reply to request:", err)
+				return
+			}
+			err = s.Close()
 			if err != nil {
 				log.Printf("failed to close session: %v", err)
 			}
 			return
 		}
-		portUtil.Manager.SetPortStatus(portToBind, true)
+		err := portUtil.Manager.SetPortStatus(portToBind, true)
+		if err != nil {
+			log.Println("Failed to set port status:", err)
+			return
+		}
 	}
 	s.handleTCPForward(req, addr, portToBind)
 }
@@ -214,7 +316,11 @@ func (s *SSHSession) handleHTTPForward(req *ssh.Request, portToBind uint16) {
 
 	slug := generateUniqueSlug()
 	if slug == "" {
-		req.Reply(false, nil)
+		err := req.Reply(false, nil)
+		if err != nil {
+			log.Println("Failed to reply to request:", err)
+			return
+		}
 		return
 	}
 
@@ -222,7 +328,11 @@ func (s *SSHSession) handleHTTPForward(req *ssh.Request, portToBind uint16) {
 	registerClient(slug, s)
 
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, uint32(80))
+	err := binary.Write(buf, binary.BigEndian, uint32(80))
+	if err != nil {
+		log.Println("Failed to reply to request:", err)
+		return
+	}
 	log.Printf("HTTP forwarding approved on port: %d", 80)
 
 	domain := utils.Getenv("domain")
@@ -233,7 +343,11 @@ func (s *SSHSession) handleHTTPForward(req *ssh.Request, portToBind uint16) {
 
 	s.interaction.ShowWelcomeMessage()
 	s.interaction.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s\r\n", protocol, slug, domain))
-	req.Reply(true, buf.Bytes())
+	err = req.Reply(true, buf.Bytes())
+	if err != nil {
+		log.Println("Failed to reply to request:", err)
+		return
+	}
 }
 
 func (s *SSHSession) handleTCPForward(req *ssh.Request, addr string, portToBind uint16) {
@@ -243,8 +357,12 @@ func (s *SSHSession) handleTCPForward(req *ssh.Request, addr string, portToBind 
 	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", portToBind))
 	if err != nil {
 		s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port.\r\n", portToBind))
-		req.Reply(false, nil)
-		err := s.Close()
+		err := req.Reply(false, nil)
+		if err != nil {
+			log.Println("Failed to reply to request:", err)
+			return
+		}
+		err = s.Close()
 		if err != nil {
 			log.Printf("failed to close session: %v", err)
 		}
@@ -258,9 +376,17 @@ func (s *SSHSession) handleTCPForward(req *ssh.Request, addr string, portToBind 
 	go s.acceptTCPConnections()
 
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, uint32(portToBind))
+	err = binary.Write(buf, binary.BigEndian, uint32(portToBind))
+	if err != nil {
+		log.Println("Failed to reply to request:", err)
+		return
+	}
 	log.Printf("TCP forwarding approved on port: %d", portToBind)
-	req.Reply(true, buf.Bytes())
+	err = req.Reply(true, buf.Bytes())
+	if err != nil {
+		log.Println("Failed to reply to request:", err)
+		return
+	}
 }
 
 func (s *SSHSession) acceptTCPConnections() {
@@ -366,7 +492,12 @@ func waitForKeyPress(connection ssh.Channel) {
 }
 
 func (s *SSHSession) HandleForwardedConnection(conn UserConnection, sshConn *ssh.ServerConn) {
-	defer conn.Writer.Close()
+	defer func(Writer net.Conn) {
+		err := Writer.Close()
+		if err != nil {
+			log.Println("Failed to close connection:", err)
+		}
+	}(conn.Writer)
 
 	log.Printf("Handling new forwarded connection from %s", conn.Writer.RemoteAddr())
 	host, originPort := ParseAddr(conn.Writer.RemoteAddr().String())
@@ -380,7 +511,12 @@ func (s *SSHSession) HandleForwardedConnection(conn UserConnection, sshConn *ssh
 		sendBadGatewayResponse(conn.Writer)
 		return
 	}
-	defer channel.Close()
+	defer func(channel ssh.Channel) {
+		err := channel.Close()
+		if err != nil {
+			log.Println("Failed to close connection:", err)
+		}
+	}(channel)
 
 	go func() {
 		defer func() {
@@ -389,7 +525,11 @@ func (s *SSHSession) HandleForwardedConnection(conn UserConnection, sshConn *ssh
 			}
 		}()
 		for req := range reqs {
-			req.Reply(false, nil)
+			err := req.Reply(false, nil)
+			if err != nil {
+				log.Printf("Failed to reply to request: %v", err)
+				return
+			}
 		}
 	}()
 
@@ -407,7 +547,6 @@ func (s *SSHSession) HandleForwardedConnection(conn UserConnection, sshConn *ssh
 			}
 			cancel()
 		}()
-
 		_, err := io.Copy(channel, conn.Reader)
 		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
 			log.Printf("Error copying from conn.Reader to channel: %v", err)
@@ -447,7 +586,13 @@ func (s *SSHSession) HandleForwardedConnection(conn UserConnection, sshConn *ssh
 
 	s.interaction.SendMessage(fmt.Sprintf("\033[32m%s -> [%s] TUNNEL ADDRESS -- \"%s\"\033[0m\r\n", conn.Writer.RemoteAddr().String(), s.forwarder.TunnelType, timestamp))
 
-	_, err = io.Copy(conn.Writer, reader)
+	if s.forwarder.GetTunnelType() == HTTP {
+		ir := &HeaderModifier{r: reader}
+		_, err = io.Copy(conn.Writer, ir)
+	} else {
+		_, err = io.Copy(conn.Writer, reader)
+	}
+
 	if err != nil && !errors.Is(err, io.EOF) {
 		log.Printf("Error copying from channel to conn.Writer: %v", err)
 	}
@@ -458,11 +603,19 @@ func sendBadGatewayResponse(writer io.Writer) {
 		"Content-Length: 11\r\n" +
 		"Content-Type: text/plain\r\n\r\n" +
 		"Bad Gateway"
-	io.Copy(writer, bytes.NewReader([]byte(response)))
+	_, err := io.Copy(writer, bytes.NewReader([]byte(response)))
+	if err != nil {
+		log.Printf("failed to write Bad Gateway response: %v", err)
+		return
+	}
 }
 
 func writeSSHString(buffer *bytes.Buffer, str string) {
-	binary.Write(buffer, binary.BigEndian, uint32(len(str)))
+	err := binary.Write(buffer, binary.BigEndian, uint32(len(str)))
+	if err != nil {
+		log.Printf("Failed to write string to buffer: %v", err)
+		return
+	}
 	buffer.WriteString(str)
 }
 
@@ -480,9 +633,17 @@ func createForwardedTCPIPPayload(host string, originPort, port uint16) []byte {
 	var buf bytes.Buffer
 
 	writeSSHString(&buf, "localhost")
-	binary.Write(&buf, binary.BigEndian, uint32(port))
+	err := binary.Write(&buf, binary.BigEndian, uint32(port))
+	if err != nil {
+		log.Printf("Failed to write string to buffer: %v", err)
+		return nil
+	}
 	writeSSHString(&buf, host)
-	binary.Write(&buf, binary.BigEndian, uint32(originPort))
+	err = binary.Write(&buf, binary.BigEndian, uint32(originPort))
+	if err != nil {
+		log.Printf("Failed to write string to buffer: %v", err)
+		return nil
+	}
 
 	return buf.Bytes()
 }

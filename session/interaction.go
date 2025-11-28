@@ -79,14 +79,30 @@ func (i *Interaction) HandleSlugEditMode(connection ssh.Channel, char byte, comm
 	} else if char == 8 || char == 127 {
 		if len(i.EditSlug) > 0 {
 			i.EditSlug = (i.EditSlug)[:len(i.EditSlug)-1]
-			connection.Write([]byte("\r\033[K"))
-			connection.Write([]byte("➤ " + i.EditSlug + "." + utils.Getenv("domain")))
+			_, err := connection.Write([]byte("\r\033[K"))
+			if err != nil {
+				log.Printf("failed to write to channel: %v", err)
+				return
+			}
+			_, err = connection.Write([]byte("➤ " + i.EditSlug + "." + utils.Getenv("domain")))
+			if err != nil {
+				log.Printf("failed to write to channel: %v", err)
+				return
+			}
 		}
 	} else if char >= 32 && char <= 126 {
 		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '-' {
 			i.EditSlug += string(char)
-			connection.Write([]byte("\r\033[K"))
-			connection.Write([]byte("➤ " + i.EditSlug + "." + utils.Getenv("domain")))
+			_, err := connection.Write([]byte("\r\033[K"))
+			if err != nil {
+				log.Printf("failed to write to channel: %v", err)
+				return
+			}
+			_, err = connection.Write([]byte("➤ " + i.EditSlug + "." + utils.Getenv("domain")))
+			if err != nil {
+				log.Printf("failed to write to channel: %v", err)
+				return
+			}
 		}
 	}
 }
@@ -94,7 +110,11 @@ func (i *Interaction) HandleSlugEditMode(connection ssh.Channel, char byte, comm
 func (i *Interaction) HandleSlugSave(connection ssh.Channel) {
 	isValid := isValidSlug(i.EditSlug)
 
-	connection.Write([]byte("\033[H\033[2J"))
+	_, err := connection.Write([]byte("\033[H\033[2J"))
+	if err != nil {
+		log.Printf("failed to write to channel: %v", err)
+		return
+	}
 	if isValid {
 		oldSlug := i.getSlug()
 		newSlug := i.EditSlug
@@ -104,24 +124,72 @@ func (i *Interaction) HandleSlugSave(connection ssh.Channel) {
 			return
 		}
 
-		connection.Write([]byte("\r\n\r\n✅ SUBDOMAIN UPDATED ✅\r\n\r\n"))
-		connection.Write([]byte("Your new address is: " + newSlug + "." + utils.Getenv("domain") + "\r\n\r\n"))
-		connection.Write([]byte("Press any key to continue...\r\n"))
+		_, err := connection.Write([]byte("\r\n\r\n✅ SUBDOMAIN UPDATED ✅\r\n\r\n"))
+		if err != nil {
+			log.Printf("failed to write to channel: %v", err)
+			return
+		}
+		_, err = connection.Write([]byte("Your new address is: " + newSlug + "." + utils.Getenv("domain") + "\r\n\r\n"))
+		if err != nil {
+			log.Printf("failed to write to channel: %v", err)
+			return
+		}
+		_, err = connection.Write([]byte("Press any key to continue...\r\n"))
+		if err != nil {
+			log.Printf("failed to write to channel: %v", err)
+			return
+		}
 	} else if isForbiddenSlug(i.EditSlug) {
-		connection.Write([]byte("\r\n\r\n❌ FORBIDDEN SUBDOMAIN ❌\r\n\r\n"))
-		connection.Write([]byte("This subdomain is not allowed.\r\n"))
-		connection.Write([]byte("Please try a different subdomain.\r\n\r\n"))
-		connection.Write([]byte("Press any key to continue...\r\n"))
+		_, err := connection.Write([]byte("\r\n\r\n❌ FORBIDDEN SUBDOMAIN ❌\r\n\r\n"))
+		if err != nil {
+			log.Printf("failed to write to channel: %v", err)
+			return
+		}
+		_, err = connection.Write([]byte("This subdomain is not allowed.\r\n"))
+		if err != nil {
+			log.Printf("failed to write to channel: %v", err)
+			return
+		}
+		_, err = connection.Write([]byte("Please try a different subdomain.\r\n\r\n"))
+		if err != nil {
+			log.Printf("failed to write to channel: %v", err)
+			return
+		}
+		_, err = connection.Write([]byte("Press any key to continue...\r\n"))
+		if err != nil {
+			log.Printf("failed to write to channel: %v", err)
+			return
+		}
 	} else {
-		connection.Write([]byte("\r\n\r\n❌ INVALID SUBDOMAIN ❌\r\n\r\n"))
-		connection.Write([]byte("Use only lowercase letters, numbers, and hyphens.\r\n"))
-		connection.Write([]byte("Length must be 3-20 characters and cannot start or end with a hyphen.\r\n\r\n"))
-		connection.Write([]byte("Press any key to continue...\r\n"))
+		_, err := connection.Write([]byte("\r\n\r\n❌ INVALID SUBDOMAIN ❌\r\n\r\n"))
+		if err != nil {
+			log.Printf("failed to write to channel: %v", err)
+			return
+		}
+		_, err = connection.Write([]byte("Use only lowercase letters, numbers, and hyphens.\r\n"))
+		if err != nil {
+			log.Printf("failed to write to channel: %v", err)
+			return
+		}
+		_, err = connection.Write([]byte("Length must be 3-20 characters and cannot start or end with a hyphen.\r\n\r\n"))
+		if err != nil {
+			log.Printf("failed to write to channel: %v", err)
+			return
+		}
+		_, err = connection.Write([]byte("Press any key to continue...\r\n"))
+		if err != nil {
+			log.Printf("failed to write to channel: %v", err)
+			return
+		}
 	}
 
 	waitForKeyPress(connection)
 
-	connection.Write([]byte("\033[H\033[2J"))
+	_, err = connection.Write([]byte("\033[H\033[2J"))
+	if err != nil {
+		log.Printf("failed to write to channel: %v", err)
+		return
+	}
 	i.ShowWelcomeMessage()
 
 	domain := utils.Getenv("domain")
@@ -129,7 +197,11 @@ func (i *Interaction) HandleSlugSave(connection ssh.Channel) {
 	if utils.Getenv("tls_enabled") == "true" {
 		protocol = "https"
 	}
-	connection.Write([]byte(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, i.getSlug(), domain)))
+	_, err = connection.Write([]byte(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, i.getSlug(), domain)))
+	if err != nil {
+		log.Printf("failed to write to channel: %v", err)
+		return
+	}
 
 	i.EditMode = false
 	i.CommandBuffer.Reset()
@@ -137,13 +209,29 @@ func (i *Interaction) HandleSlugSave(connection ssh.Channel) {
 
 func (i *Interaction) HandleSlugCancel(connection ssh.Channel, commandBuffer *bytes.Buffer) {
 	i.EditMode = false
-	connection.Write([]byte("\033[H\033[2J"))
-	connection.Write([]byte("\r\n\r\n⚠️ SUBDOMAIN EDIT CANCELLED ⚠️\r\n\r\n"))
-	connection.Write([]byte("Press any key to continue...\r\n"))
+	_, err := connection.Write([]byte("\033[H\033[2J"))
+	if err != nil {
+		log.Printf("failed to write to channel: %v", err)
+		return
+	}
+	_, err = connection.Write([]byte("\r\n\r\n⚠️ SUBDOMAIN EDIT CANCELLED ⚠️\r\n\r\n"))
+	if err != nil {
+		log.Printf("failed to write to channel: %v", err)
+		return
+	}
+	_, err = connection.Write([]byte("Press any key to continue...\r\n"))
+	if err != nil {
+		log.Printf("failed to write to channel: %v", err)
+		return
+	}
 
 	waitForKeyPress(connection)
 
-	connection.Write([]byte("\033[H\033[2J"))
+	_, err = connection.Write([]byte("\033[H\033[2J"))
+	if err != nil {
+		log.Printf("failed to write to channel: %v", err)
+		return
+	}
 	i.ShowWelcomeMessage()
 
 	commandBuffer.Reset()
