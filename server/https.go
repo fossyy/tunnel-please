@@ -54,8 +54,16 @@ func HandlerTLS(conn net.Conn) {
 
 	host := strings.Split(parseHostFromHeader(headers), ".")
 	if len(host) < 1 {
-		conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
-		conn.Close()
+		_, err := conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
+		if err != nil {
+			log.Println("Failed to write 400 Bad Request:", err)
+			return
+		}
+		err = conn.Close()
+		if err != nil {
+			log.Println("Failed to close connection:", err)
+			return
+		}
 		return
 	}
 
@@ -97,12 +105,20 @@ func HandlerTLS(conn net.Conn) {
 
 	sshSession, ok := session.Clients[slug]
 	if !ok {
-		conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
+		_, err := conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
 			fmt.Sprintf("Location: https://tunnl.live/tunnel-not-found?slug=%s\r\n", slug) +
 			"Content-Length: 0\r\n" +
 			"Connection: close\r\n" +
 			"\r\n"))
-		conn.Close()
+		if err != nil {
+			log.Println("Failed to write 301 Moved Permanently:", err)
+			return
+		}
+		err = conn.Close()
+		if err != nil {
+			log.Println("Failed to close connection:", err)
+			return
+		}
 		return
 	}
 

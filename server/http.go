@@ -38,9 +38,21 @@ func (w *connResponseWriter) WriteHeader(statusCode int) {
 		return
 	}
 	w.wrote = true
-	fmt.Fprintf(w.conn, "HTTP/1.1 %d %s\r\n", statusCode, http.StatusText(statusCode))
-	w.header.Write(w.conn)
-	fmt.Fprint(w.conn, "\r\n")
+	_, err := fmt.Fprintf(w.conn, "HTTP/1.1 %d %s\r\n", statusCode, http.StatusText(statusCode))
+	if err != nil {
+		log.Printf("Error writing HTTP response: %v", err)
+		return
+	}
+	err = w.header.Write(w.conn)
+	if err != nil {
+		log.Printf("Error writing HTTP header: %v", err)
+		return
+	}
+	_, err = fmt.Fprint(w.conn, "\r\n")
+	if err != nil {
+		log.Printf("Error writing HTTP header: %v", err)
+		return
+	}
 }
 
 func (w *connResponseWriter) Write(b []byte) (int, error) {
@@ -120,20 +132,36 @@ func Handler(conn net.Conn) {
 
 	host := strings.Split(parseHostFromHeader(headers), ".")
 	if len(host) < 1 {
-		conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
-		conn.Close()
+		_, err := conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
+		if err != nil {
+			log.Println("Failed to write 400 Bad Request:", err)
+			return
+		}
+		err = conn.Close()
+		if err != nil {
+			log.Println("Failed to close connection:", err)
+			return
+		}
 		return
 	}
 
 	slug := host[0]
 
 	if redirectTLS {
-		conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
+		_, err := conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
 			fmt.Sprintf("Location: https://%s.%s/\r\n", slug, utils.Getenv("domain")) +
 			"Content-Length: 0\r\n" +
 			"Connection: close\r\n" +
 			"\r\n"))
-		conn.Close()
+		if err != nil {
+			log.Println("Failed to write 301 Moved Permanently:", err)
+			return
+		}
+		err = conn.Close()
+		if err != nil {
+			log.Println("Failed to close connection:", err)
+			return
+		}
 		return
 	}
 
@@ -173,12 +201,20 @@ func Handler(conn net.Conn) {
 
 	sshSession, ok := session.Clients[slug]
 	if !ok {
-		conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
+		_, err := conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
 			fmt.Sprintf("Location: https://tunnl.live/tunnel-not-found?slug=%s\r\n", slug) +
 			"Content-Length: 0\r\n" +
 			"Connection: close\r\n" +
 			"\r\n"))
-		conn.Close()
+		if err != nil {
+			log.Println("Failed to write 301 Moved Permanently:", err)
+			return
+		}
+		err = conn.Close()
+		if err != nil {
+			log.Println("Failed to close connection:", err)
+			return
+		}
 		return
 	}
 
