@@ -262,18 +262,6 @@ func init() {
 }
 
 func NewHTTPServer() error {
-	upgrader.CheckOrigin = func(r *http.Request) bool {
-		if isAllowedAllCors {
-			return true
-		} else {
-			isAllowed, ok := allowedCors[r.Header.Get("Origin")]
-			if !ok || !isAllowed {
-				return false
-			}
-			return true
-		}
-	}
-
 	listener, err := net.Listen("tcp", ":80")
 	if err != nil {
 		return errors.New("Error listening: " + err.Error())
@@ -313,25 +301,12 @@ func Handler(conn net.Conn) {
 	if err != nil {
 		return
 	}
-	cw := NewCustomWriter(conn, dstReader, conn.RemoteAddr())
 
-	// Initial Requests
-	cw.Requests = append(cw.Requests, &RequestContext{
-		Host:    reqhf.Get("Host"),
-		Path:    reqhf.Path,
-		Method:  reqhf.Method,
-		Chunked: false,
-	})
 	host := strings.Split(reqhf.Get("Host"), ".")
 	if len(host) < 1 {
 		_, err := conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
 		if err != nil {
 			log.Println("Failed to write 400 Bad Request:", err)
-			return
-		}
-		err = conn.Close()
-		if err != nil {
-			log.Println("Failed to close connection:", err)
 			return
 		}
 		return
@@ -349,43 +324,22 @@ func Handler(conn net.Conn) {
 			log.Println("Failed to write 301 Moved Permanently:", err)
 			return
 		}
-		err = conn.Close()
-		if err != nil {
-			log.Println("Failed to close connection:", err)
-			return
-		}
 		return
 	}
 
 	if slug == "ping" {
-		req, err := http.ReadRequest(dstReader)
+		// TODO: implement cors
+		_, err := conn.Write([]byte(
+			"HTTP/1.1 200 OK\r\n" +
+				"Content-Length: 0\r\n" +
+				"Connection: close\r\n" +
+				"Access-Control-Allow-Origin: *\r\n" +
+				"Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n" +
+				"Access-Control-Allow-Headers: *\r\n" +
+				"\r\n",
+		))
 		if err != nil {
-			log.Println("failed to parse HTTP request:", err)
-			return
-		}
-		rw := &connResponseWriter{conn: conn}
-
-		wsConn, err := upgrader.Upgrade(rw, req, nil)
-		if err != nil {
-			if !strings.Contains(err.Error(), "the client is not using the websocket protocol") {
-				log.Println("Upgrade failed:", err)
-			}
-			err := conn.Close()
-			if err != nil {
-				log.Println("failed to close connection:", err)
-				return
-			}
-			return
-		}
-
-		err = wsConn.WriteMessage(websocket.TextMessage, []byte("pong"))
-		if err != nil {
-			log.Println("failed to write pong:", err)
-			return
-		}
-		err = wsConn.Close()
-		if err != nil {
-			log.Println("websocket close failed :", err)
+			log.Println("Failed to write 200 OK:", err)
 			return
 		}
 		return
@@ -409,7 +363,15 @@ func Handler(conn net.Conn) {
 		}
 		return
 	}
+	cw := NewCustomWriter(conn, dstReader, conn.RemoteAddr())
 
+	// Initial Requests
+	cw.Requests = append(cw.Requests, &RequestContext{
+		Host:    reqhf.Get("Host"),
+		Path:    reqhf.Path,
+		Method:  reqhf.Method,
+		Chunked: false,
+	})
 	forwardRequest(cw, reqhf, sshSession)
 	return
 }
