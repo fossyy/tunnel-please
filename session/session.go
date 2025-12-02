@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	INITIALIZING SessionStatus = "INITIALIZING"
-	RUNNING      SessionStatus = "RUNNING"
-	SETUP        SessionStatus = "SETUP"
+	INITIALIZING Status = "INITIALIZING"
+	RUNNING      Status = "RUNNING"
+	SETUP        Status = "SETUP"
 )
 
 type TunnelType string
@@ -58,7 +58,7 @@ type Session interface {
 }
 
 type Lifecycle struct {
-	Status SessionStatus
+	Status Status
 }
 
 type Forwarder struct {

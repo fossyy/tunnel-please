@@ -17,7 +17,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-var BAD_GATEWAY_RESPONSE = []byte("HTTP/1.1 502 Bad Gateway\r\n" +
+var BadGatewayResponse = []byte("HTTP/1.1 502 Bad Gateway\r\n" +
 	"Content-Length: 11\r\n" +
 	"Content-Type: text/plain\r\n\r\n" +
 	"Bad Gateway")
@@ -32,9 +32,18 @@ type CustomWriter struct {
 }
 
 func (cw *CustomWriter) Read(p []byte) (int, error) {
+	if cw == nil {
+		return 0, errors.New("can not read from nil CustomWriter")
+	}
 	read, err := cw.reader.Read(p)
 	reader := bytes.NewReader(p)
-	reqhf, _ := NewRequestHeaderFactory(reader)
+	reqhf, err := NewRequestHeaderFactory(reader)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return read, io.EOF
+		}
+		return 0, err
+	}
 	cw.interaction.SendMessage(fmt.Sprintf("\033[32m%s %s -> %s %s \033[0m\r\n", time.Now().UTC().Format(time.RFC3339), cw.RemoteAddr.String(), reqhf.Method, reqhf.Path))
 	return read, err
 }
@@ -75,7 +84,7 @@ func isHTTPHeader(buf []byte) bool {
 }
 
 func (cw *CustomWriter) Write(p []byte) (int, error) {
-	if len(p) == len(BAD_GATEWAY_RESPONSE) && bytes.Equal(p, BAD_GATEWAY_RESPONSE) {
+	if len(p) == len(BadGatewayResponse) && bytes.Equal(p, BadGatewayResponse) {
 		return cw.writer.Write(p)
 	}
 
@@ -279,7 +288,7 @@ func forwardRequest(cw *CustomWriter, initialRequest *RequestHeaderFactory, sshS
 }
 
 func sendBadGatewayResponse(writer io.Writer) {
-	_, err := writer.Write(BAD_GATEWAY_RESPONSE)
+	_, err := writer.Write(BadGatewayResponse)
 	if err != nil {
 		log.Printf("failed to write Bad Gateway response: %v", err)
 		return

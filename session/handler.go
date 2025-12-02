@@ -18,7 +18,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-type SessionStatus string
+type Status string
 
 var forbiddenSlug = []string{
 	"ping",
@@ -191,7 +191,7 @@ func (s *SSHSession) handleTCPIPForward(req *ssh.Request) {
 			unassign, success := portUtil.Manager.GetUnassignedPort()
 			portToBind = unassign
 			if !success {
-				s.Interaction.SendMessage(fmt.Sprintf("No available port\r\n", portToBind))
+				s.Interaction.SendMessage("No available port\r\n")
 				err := req.Reply(false, nil)
 				if err != nil {
 					log.Println("Failed to reply to request:", err)
@@ -338,19 +338,8 @@ func (s *SSHSession) acceptTCPConnections() {
 			log.Printf("Failed to open forwarded-tcpip channel: %v", err)
 			return
 		}
-		defer func(channel ssh.Channel) {
-			err := channel.Close()
-			if err != nil {
-				log.Println("Failed to close connection:", err)
-			}
-		}(channel)
 
 		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("Panic in request handler: %v", r)
-				}
-			}()
 			for req := range reqs {
 				err := req.Reply(false, nil)
 				if err != nil {
