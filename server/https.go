@@ -7,12 +7,9 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"net/http"
 	"strings"
 	"tunnel_pls/session"
 	"tunnel_pls/utils"
-
-	"github.com/gorilla/websocket"
 )
 
 func NewHTTPSServer() error {
@@ -45,14 +42,23 @@ func NewHTTPSServer() error {
 }
 
 func HandlerTLS(conn net.Conn) {
-	reader := bufio.NewReader(conn)
-	headers, err := peekUntilHeaders(reader, 8192)
+	defer func() {
+		err := conn.Close()
+		if err != nil {
+			log.Printf("Error closing connection: %v", err)
+			return
+		}
+		return
+	}()
+
+	dstReader := bufio.NewReader(conn)
+	reqhf, err := NewRequestHeaderFactory(dstReader)
 	if err != nil {
-		log.Println("Failed to peek headers:", err)
+		log.Printf("Error creating request header: %v", err)
 		return
 	}
 
-	host := strings.Split(parseHostFromHeader(headers), ".")
+	host := strings.Split(reqhf.Get("Host"), ".")
 	if len(host) < 1 {
 		_, err := conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
 		if err != nil {
@@ -70,34 +76,18 @@ func HandlerTLS(conn net.Conn) {
 	slug := host[0]
 
 	if slug == "ping" {
-		req, err := http.ReadRequest(reader)
+		// TODO: implement cors
+		_, err := conn.Write([]byte(
+			"HTTP/1.1 200 OK\r\n" +
+				"Content-Length: 0\r\n" +
+				"Connection: close\r\n" +
+				"Access-Control-Allow-Origin: *\r\n" +
+				"Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n" +
+				"Access-Control-Allow-Headers: *\r\n" +
+				"\r\n",
+		))
 		if err != nil {
-			log.Println("failed to parse HTTP request:", err)
-			return
-		}
-		rw := &connResponseWriter{conn: conn}
-
-		wsConn, err := upgrader.Upgrade(rw, req, nil)
-		if err != nil {
-			if !strings.Contains(err.Error(), "the client is not using the websocket protocol") {
-				log.Println("Upgrade failed:", err)
-			}
-			err := conn.Close()
-			if err != nil {
-				log.Println("failed to close connection:", err)
-				return
-			}
-			return
-		}
-
-		err = wsConn.WriteMessage(websocket.TextMessage, []byte("pong"))
-		if err != nil {
-			log.Println("failed to write pong:", err)
-			return
-		}
-		err = wsConn.Close()
-		if err != nil {
-			log.Println("websocket close failed :", err)
+			log.Println("Failed to write 200 OK:", err)
 			return
 		}
 		return
@@ -121,10 +111,8 @@ func HandlerTLS(conn net.Conn) {
 		}
 		return
 	}
+	cw := NewCustomWriter(conn, dstReader, conn.RemoteAddr())
 
-	sshSession.HandleForwardedConnection(session.UserConnection{
-		Reader: reader,
-		Writer: conn,
-	}, sshSession.Conn)
+	forwardRequest(cw, reqhf, sshSession)
 	return
 }

@@ -5,99 +5,185 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
-	"net/http"
+	"regexp"
 	"strings"
 	"tunnel_pls/session"
 	"tunnel_pls/utils"
 
-	"github.com/gorilla/websocket"
+	"golang.org/x/crypto/ssh"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
+var BadGatewayResponse = []byte("HTTP/1.1 502 Bad Gateway\r\n" +
+	"Content-Length: 11\r\n" +
+	"Content-Type: text/plain\r\n\r\n" +
+	"Bad Gateway")
+
+type CustomWriter struct {
+	RemoteAddr  net.Addr
+	writer      io.Writer
+	reader      io.Reader
+	headerBuf   []byte
+	buf         []byte
+	respHeader  *ResponseHeaderFactory
+	reqHeader   *RequestHeaderFactory
+	interaction *session.Interaction
+	respMW      []ResponseMiddleware
+	reqStartMW  []RequestMiddleware
+	reqEndMW    []RequestMiddleware
 }
 
-type connResponseWriter struct {
-	conn   net.Conn
-	header http.Header
-	wrote  bool
-}
-
-func (w *connResponseWriter) Header() http.Header {
-	if w.header == nil {
-		w.header = make(http.Header)
-	}
-	return w.header
-}
-
-func (w *connResponseWriter) WriteHeader(statusCode int) {
-	if w.wrote {
-		return
-	}
-	w.wrote = true
-	_, err := fmt.Fprintf(w.conn, "HTTP/1.1 %d %s\r\n", statusCode, http.StatusText(statusCode))
+func (cw *CustomWriter) Read(p []byte) (int, error) {
+	tmp := make([]byte, len(p))
+	read, err := cw.reader.Read(tmp)
 	if err != nil {
-		log.Printf("Error writing HTTP response: %v", err)
-		return
+		return 0, err
 	}
-	err = w.header.Write(w.conn)
-	if err != nil {
-		log.Printf("Error writing HTTP header: %v", err)
-		return
+
+	tmp = tmp[:read]
+
+	idx := bytes.Index(tmp, DELIMITER)
+	if idx == -1 {
+		copy(p, tmp)
+		return read, nil
 	}
-	_, err = fmt.Fprint(w.conn, "\r\n")
+
+	header := tmp[:idx+len(DELIMITER)]
+	body := tmp[idx+len(DELIMITER):]
+
+	if !isHTTPHeader(header) {
+		copy(p, tmp)
+		return read, nil
+	}
+
+	for _, m := range cw.reqEndMW {
+		err := m.HandleRequest(cw.reqHeader)
+		if err != nil {
+			log.Printf("Error when applying request middleware: %v", err)
+			return 0, err
+		}
+	}
+
+	headerReader := bufio.NewReader(bytes.NewReader(header))
+	reqhf, err := NewRequestHeaderFactory(headerReader)
 	if err != nil {
-		log.Printf("Error writing HTTP header: %v", err)
-		return
+		return 0, err
+	}
+
+	for _, m := range cw.reqStartMW {
+		err := m.HandleRequest(reqhf)
+		if err != nil {
+			log.Printf("Error when applying request middleware: %v", err)
+			return 0, err
+		}
+	}
+
+	cw.reqHeader = reqhf
+	finalHeader := reqhf.Finalize()
+
+	n := copy(p, finalHeader)
+	n += copy(p[n:], body)
+
+	return n, nil
+}
+
+func NewCustomWriter(writer io.Writer, reader io.Reader, remoteAddr net.Addr) *CustomWriter {
+	return &CustomWriter{
+		RemoteAddr:  remoteAddr,
+		writer:      writer,
+		reader:      reader,
+		buf:         make([]byte, 0, 4096),
+		interaction: nil,
 	}
 }
 
-func (w *connResponseWriter) Write(b []byte) (int, error) {
-	if !w.wrote {
-		w.WriteHeader(http.StatusOK)
+var DELIMITER = []byte{0x0D, 0x0A, 0x0D, 0x0A} // HTTP HEADER DELIMITER `\r\n\r\n`
+var requestLine = regexp.MustCompile(`^(GET|POST|PUT|DELETE|HEAD|OPTIONS|PATCH|TRACE|CONNECT) \S+ HTTP/\d\.\d$`)
+var responseLine = regexp.MustCompile(`^HTTP/\d\.\d \d{3} .+`)
+
+func isHTTPHeader(buf []byte) bool {
+	lines := bytes.Split(buf, []byte("\r\n"))
+	if len(lines) < 1 {
+		return false
 	}
-	return w.conn.Write(b)
+	startLine := string(lines[0])
+	if !requestLine.MatchString(startLine) && !responseLine.MatchString(startLine) {
+		return false
+	}
+
+	for _, line := range lines[1:] {
+		if len(line) == 0 {
+			break
+		}
+		if !bytes.Contains(line, []byte(":")) {
+			return false
+		}
+	}
+	return true
 }
 
-func (w *connResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	rw := bufio.NewReadWriter(
-		bufio.NewReader(w.conn),
-		bufio.NewWriter(w.conn),
-	)
-	return w.conn, rw, nil
+func (cw *CustomWriter) Write(p []byte) (int, error) {
+	if len(p) == len(BadGatewayResponse) && bytes.Equal(p, BadGatewayResponse) {
+		return cw.writer.Write(p)
+	}
+
+	cw.buf = append(cw.buf, p...)
+	// TODO: implement middleware buat cache system dll
+	if idx := bytes.Index(cw.buf, DELIMITER); idx != -1 {
+		header := cw.buf[:idx+len(DELIMITER)]
+		body := cw.buf[idx+len(DELIMITER):]
+
+		if isHTTPHeader(header) {
+			resphf := NewResponseHeaderFactory(header)
+			for _, m := range cw.respMW {
+				err := m.HandleResponse(resphf, body)
+				if err != nil {
+					log.Printf("Cannot apply middleware: %s\n", err)
+					return 0, err
+				}
+			}
+			header = resphf.Finalize()
+			cw.respHeader = resphf
+			_, err := cw.writer.Write(header)
+			if err != nil {
+				return 0, err
+			}
+
+			if len(body) > 0 {
+				_, err := cw.writer.Write(body)
+				if err != nil {
+					return 0, err
+				}
+			}
+			cw.buf = nil
+			return len(p), nil
+		}
+	}
+
+	cw.buf = nil
+	n, err := cw.writer.Write(p)
+	if err != nil {
+		return n, err
+	}
+	for _, m := range cw.respMW {
+		err := m.HandleResponse(cw.respHeader, p)
+		if err != nil {
+			log.Printf("Cannot apply middleware: %s\n", err)
+			return 0, err
+		}
+	}
+	return n, nil
+}
+
+func (cw *CustomWriter) AddInteraction(interaction *session.Interaction) {
+	cw.interaction = interaction
 }
 
 var redirectTLS = false
-var allowedCors = make(map[string]bool)
-var isAllowedAllCors = false
-
-func init() {
-	corsList := utils.Getenv("cors_list")
-	if corsList == "*" {
-		isAllowedAllCors = true
-	} else {
-		for _, allowedOrigin := range strings.Split(corsList, ",") {
-			allowedCors[allowedOrigin] = true
-		}
-	}
-}
 
 func NewHTTPServer() error {
-	upgrader.CheckOrigin = func(r *http.Request) bool {
-		if isAllowedAllCors {
-			return true
-		} else {
-			isAllowed, ok := allowedCors[r.Header.Get("Origin")]
-			if !ok || !isAllowed {
-				return false
-			}
-			return true
-		}
-	}
-
 	listener, err := net.Listen("tcp", ":80")
 	if err != nil {
 		return errors.New("Error listening: " + err.Error())
@@ -123,23 +209,27 @@ func NewHTTPServer() error {
 }
 
 func Handler(conn net.Conn) {
-	reader := bufio.NewReader(conn)
-	headers, err := peekUntilHeaders(reader, 8192)
+	defer func() {
+		err := conn.Close()
+		if err != nil {
+			log.Printf("Error closing connection: %v", err)
+			return
+		}
+		return
+	}()
+
+	dstReader := bufio.NewReader(conn)
+	reqhf, err := NewRequestHeaderFactory(dstReader)
 	if err != nil {
-		log.Println("Failed to peek headers:", err)
+		log.Printf("Error creating request header: %v", err)
 		return
 	}
 
-	host := strings.Split(parseHostFromHeader(headers), ".")
+	host := strings.Split(reqhf.Get("Host"), ".")
 	if len(host) < 1 {
 		_, err := conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
 		if err != nil {
 			log.Println("Failed to write 400 Bad Request:", err)
-			return
-		}
-		err = conn.Close()
-		if err != nil {
-			log.Println("Failed to close connection:", err)
 			return
 		}
 		return
@@ -157,43 +247,22 @@ func Handler(conn net.Conn) {
 			log.Println("Failed to write 301 Moved Permanently:", err)
 			return
 		}
-		err = conn.Close()
-		if err != nil {
-			log.Println("Failed to close connection:", err)
-			return
-		}
 		return
 	}
 
 	if slug == "ping" {
-		req, err := http.ReadRequest(reader)
+		// TODO: implement cors
+		_, err := conn.Write([]byte(
+			"HTTP/1.1 200 OK\r\n" +
+				"Content-Length: 0\r\n" +
+				"Connection: close\r\n" +
+				"Access-Control-Allow-Origin: *\r\n" +
+				"Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n" +
+				"Access-Control-Allow-Headers: *\r\n" +
+				"\r\n",
+		))
 		if err != nil {
-			log.Println("failed to parse HTTP request:", err)
-			return
-		}
-		rw := &connResponseWriter{conn: conn}
-
-		wsConn, err := upgrader.Upgrade(rw, req, nil)
-		if err != nil {
-			if !strings.Contains(err.Error(), "the client is not using the websocket protocol") {
-				log.Println("Upgrade failed:", err)
-			}
-			err := conn.Close()
-			if err != nil {
-				log.Println("failed to close connection:", err)
-				return
-			}
-			return
-		}
-
-		err = wsConn.WriteMessage(websocket.TextMessage, []byte("pong"))
-		if err != nil {
-			log.Println("failed to write pong:", err)
-			return
-		}
-		err = wsConn.Close()
-		if err != nil {
-			log.Println("websocket close failed :", err)
+			log.Println("Failed to write 200 OK:", err)
 			return
 		}
 		return
@@ -217,40 +286,74 @@ func Handler(conn net.Conn) {
 		}
 		return
 	}
+	cw := NewCustomWriter(conn, dstReader, conn.RemoteAddr())
 
-	sshSession.HandleForwardedConnection(session.UserConnection{
-		Reader: reader,
-		Writer: conn,
-	}, sshSession.Conn)
+	forwardRequest(cw, reqhf, sshSession)
 	return
 }
 
-func peekUntilHeaders(reader *bufio.Reader, maxBytes int) ([]byte, error) {
-	var buf []byte
-	for {
-		n := len(buf) + 1
-		if n > maxBytes {
-			return buf, nil
-		}
-
-		peek, err := reader.Peek(n)
+func forwardRequest(cw *CustomWriter, initialRequest *RequestHeaderFactory, sshSession *session.SSHSession) {
+	cw.AddInteraction(sshSession.Interaction)
+	originHost, originPort := ParseAddr(cw.RemoteAddr.String())
+	payload := createForwardedTCPIPPayload(originHost, uint16(originPort), sshSession.Forwarder.GetForwardedPort())
+	channel, reqs, err := sshSession.Conn.OpenChannel("forwarded-tcpip", payload)
+	if err != nil {
+		log.Printf("Failed to open forwarded-tcpip channel: %v", err)
+		sendBadGatewayResponse(cw)
+		return
+	}
+	defer func(channel ssh.Channel) {
+		err := channel.Close()
 		if err != nil {
-			return nil, err
+			if errors.Is(err, io.EOF) {
+				sendBadGatewayResponse(cw)
+				return
+			}
+			log.Println("Failed to close connection:", err)
+			return
 		}
-		buf = peek
+	}(channel)
 
-		if bytes.Contains(buf, []byte("\r\n\r\n")) {
-			return buf, nil
+	go func() {
+		for req := range reqs {
+			err := req.Reply(false, nil)
+			if err != nil {
+				log.Printf("Failed to reply to request: %v", err)
+				return
+			}
+		}
+	}()
+	_, err = channel.Write(initialRequest.Finalize())
+	if err != nil {
+		log.Printf("Failed to forward request: %v", err)
+		return
+	}
+	//TODO: Implement wrapper func buat add/remove middleware
+	fingerprintMiddleware := NewTunnelFingerprint()
+	loggerMiddleware := NewRequestLogger(cw.interaction, cw.RemoteAddr)
+	cw.respMW = append(cw.respMW, fingerprintMiddleware)
+	cw.reqStartMW = append(cw.reqStartMW, loggerMiddleware)
+
+	//TODO: Tambah req Middleware
+	cw.reqEndMW = nil
+	cw.reqHeader = initialRequest
+
+	for _, m := range cw.reqStartMW {
+		err := m.HandleRequest(cw.reqHeader)
+		if err != nil {
+			log.Printf("Error handling request: %v", err)
+			return
 		}
 	}
+
+	sshSession.HandleForwardedConnection(cw, channel, cw.RemoteAddr)
+	return
 }
 
-func parseHostFromHeader(data []byte) string {
-	lines := strings.Split(string(data), "\r\n")
-	for _, line := range lines {
-		if strings.HasPrefix(strings.ToLower(line), "host:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "Host:"))
-		}
+func sendBadGatewayResponse(writer io.Writer) {
+	_, err := writer.Write(BadGatewayResponse)
+	if err != nil {
+		log.Printf("failed to write Bad Gateway response: %v", err)
+		return
 	}
-	return ""
 }
