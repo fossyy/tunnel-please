@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"log"
 	"sync"
 	"tunnel_pls/session/forwarder"
@@ -12,11 +13,12 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-type Session interface {
-	lifecycle.Lifecycle
-	interaction.InteractionController
-	forwarder.ForwardingController
+var (
+	clientsMutex sync.RWMutex
+	Clients      = make(map[string]*SSHSession)
+)
 
+type Session interface {
 	HandleGlobalRequest(ch <-chan *ssh.Request)
 	HandleTCPIPForward(req *ssh.Request)
 	HandleHTTPForward(req *ssh.Request, port uint16)
@@ -25,7 +27,7 @@ type Session interface {
 
 type SSHSession struct {
 	Lifecycle   lifecycle.SessionLifecycle
-	Interaction interaction.InteractionController
+	Interaction interaction.Controller
 	Forwarder   forwarder.ForwardingController
 	SlugManager slug.Manager
 }
@@ -39,7 +41,7 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 		SlugManager:   slugManager,
 	}
 	interactionManager := &interaction.Interaction{
-		CommandBuffer: nil,
+		CommandBuffer: bytes.NewBuffer(make([]byte, 0, 20)),
 		EditMode:      false,
 		EditSlug:      "",
 		SlugManager:   slugManager,
@@ -54,13 +56,18 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 		Forwarder:   forwarderManager,
 		SlugManager: slugManager,
 	}
+
+	interactionManager.SetLifecycle(lifecycleManager)
+	interactionManager.SetSlugModificator(updateClientSlug)
+	forwarderManager.SetLifecycle(lifecycleManager)
+	lifecycleManager.SetUnregisterClient(unregisterClient)
+	
 	session := &SSHSession{
 		Lifecycle:   lifecycleManager,
 		Interaction: interactionManager,
 		Forwarder:   forwarderManager,
 		SlugManager: slugManager,
 	}
-	interactionManager.SetLifecycle(lifecycleManager)
 
 	go func() {
 		go session.Lifecycle.WaitForRunningStatus()
@@ -70,7 +77,6 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 			if session.Lifecycle.GetChannel() == nil {
 				session.Lifecycle.SetChannel(ch)
 				session.Interaction.SetChannel(ch)
-				//session.Interaction.channel = ch
 				session.Lifecycle.SetStatus(types.SETUP)
 				go session.HandleGlobalRequest(forwardingReq)
 			}
@@ -84,10 +90,24 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 	}()
 }
 
-var (
-	clientsMutex sync.RWMutex
-	Clients      = make(map[string]*SSHSession)
-)
+func updateClientSlug(oldSlug, newSlug string) bool {
+	clientsMutex.Lock()
+	defer clientsMutex.Unlock()
+
+	if _, exists := Clients[newSlug]; exists && newSlug != oldSlug {
+		return false
+	}
+
+	client, ok := Clients[oldSlug]
+	if !ok {
+		return false
+	}
+
+	delete(Clients, oldSlug)
+	client.SlugManager.Set(newSlug)
+	Clients[newSlug] = client
+	return true
+}
 
 func registerClient(slug string, session *SSHSession) bool {
 	clientsMutex.Lock()

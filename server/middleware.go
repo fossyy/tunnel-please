@@ -29,11 +29,11 @@ func (h *TunnelFingerprint) HandleResponse(header *ResponseHeaderFactory, body [
 }
 
 type RequestLogger struct {
-	interaction interaction.InteractionController
+	interaction interaction.Controller
 	remoteAddr  net.Addr
 }
 
-func NewRequestLogger(interaction interaction.InteractionController, remoteAddr net.Addr) *RequestLogger {
+func NewRequestLogger(interaction interaction.Controller, remoteAddr net.Addr) *RequestLogger {
 	return &RequestLogger{
 		interaction: interaction,
 		remoteAddr:  remoteAddr,

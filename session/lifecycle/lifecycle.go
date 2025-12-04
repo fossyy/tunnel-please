@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"time"
+	portUtil "tunnel_pls/internal/port"
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
 
@@ -20,6 +21,7 @@ type Interaction interface {
 type Forwarder interface {
 	Close() error
 	GetTunnelType() types.TunnelType
+	GetForwardedPort() uint16
 }
 
 type Lifecycle struct {
@@ -27,9 +29,14 @@ type Lifecycle struct {
 	Conn    ssh.Conn
 	Channel ssh.Channel
 
-	Interaction Interaction
-	Forwarder   Forwarder
-	SlugManager slug.Manager
+	Interaction      Interaction
+	Forwarder        Forwarder
+	SlugManager      slug.Manager
+	unregisterClient func(slug string)
+}
+
+func (l *Lifecycle) SetUnregisterClient(unregisterClient func(slug string)) {
+	l.unregisterClient = unregisterClient
 }
 
 type SessionLifecycle interface {
@@ -39,6 +46,7 @@ type SessionLifecycle interface {
 	GetConnection() ssh.Conn
 	GetChannel() ssh.Channel
 	SetChannel(channel ssh.Channel)
+	SetUnregisterClient(unregisterClient func(slug string))
 }
 
 func (l *Lifecycle) GetChannel() ssh.Channel {
@@ -84,15 +92,9 @@ func (l *Lifecycle) WaitForRunningStatus() {
 
 func (l *Lifecycle) Close() error {
 	err := l.Forwarder.Close()
-	if err != nil {
+	if err != nil && !errors.Is(err, net.ErrClosed) {
 		return err
 	}
-	//if s.Forwarder.Listener != nil {
-	//	err := s.Forwarder.Listener.Close()
-	//	if err != nil && !errors.Is(err, net.ErrClosed) {
-	//		return err
-	//	}
-	//}
 
 	if l.Channel != nil {
 		err := l.Channel.Close()
@@ -108,17 +110,17 @@ func (l *Lifecycle) Close() error {
 		}
 	}
 
-	//clientSlug := l.SlugManager.Get()
-	//if clientSlug != "" {
-	//	unregisterClient(clientSlug)
-	//}
+	clientSlug := l.SlugManager.Get()
+	if clientSlug != "" {
+		l.unregisterClient(clientSlug)
+	}
 
-	//if l.Forwarder.GetType() == "TCP" && s.Forwarder.Listener != nil {
-	//	err := portUtil.Manager.SetPortStatus(s.Forwarder.ForwardedPort, false)
-	//	if err != nil {
-	//		return err
-	//	}
-	//}
+	if l.Forwarder.GetTunnelType() == types.TCP {
+		err := portUtil.Manager.SetPortStatus(l.Forwarder.GetForwardedPort(), false)
+		if err != nil {
+			return err
+		}
+	}
 
 	return nil
 }

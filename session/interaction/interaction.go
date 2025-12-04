@@ -14,22 +14,27 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+var forbiddenSlug = []string{
+	"ping",
+}
+
 type Lifecycle interface {
 	Close() error
 }
 
-type InteractionController interface {
+type Controller interface {
 	SendMessage(message string)
 	HandleUserInput()
-	HandleCommand(command string, commandBuffer *bytes.Buffer)
-	HandleSlugEditMode(connection ssh.Channel, char byte, commandBuffer *bytes.Buffer)
+	HandleCommand(command string)
+	HandleSlugEditMode(connection ssh.Channel, char byte)
 	HandleSlugSave(conn ssh.Channel)
-	HandleSlugCancel(connection ssh.Channel, commandBuffer *bytes.Buffer)
+	HandleSlugCancel(connection ssh.Channel)
 	HandleSlugUpdateError()
 	ShowWelcomeMessage()
 	DisplaySlugEditor()
 	SetChannel(channel ssh.Channel)
 	SetLifecycle(lifecycle Lifecycle)
+	SetSlugModificator(func(oldSlug, newSlug string) bool)
 }
 
 type Forwarder interface {
@@ -39,13 +44,14 @@ type Forwarder interface {
 }
 
 type Interaction struct {
-	CommandBuffer *bytes.Buffer
-	EditMode      bool
-	EditSlug      string
-	channel       ssh.Channel
-	SlugManager   slug.Manager
-	Forwarder     Forwarder
-	Lifecycle     Lifecycle
+	CommandBuffer    *bytes.Buffer
+	EditMode         bool
+	EditSlug         string
+	channel          ssh.Channel
+	SlugManager      slug.Manager
+	Forwarder        Forwarder
+	Lifecycle        Lifecycle
+	updateClientSlug func(oldSlug, newSlug string) bool
 }
 
 func (i *Interaction) SetLifecycle(lifecycle Lifecycle) {
@@ -67,7 +73,6 @@ func (i *Interaction) SendMessage(message string) {
 }
 
 func (i *Interaction) HandleUserInput() {
-	var commandBuffer bytes.Buffer
 	buf := make([]byte, 1)
 	i.EditMode = false
 
@@ -84,42 +89,42 @@ func (i *Interaction) HandleUserInput() {
 			char := buf[0]
 
 			if i.EditMode {
-				i.HandleSlugEditMode(i.channel, char, &commandBuffer)
+				i.HandleSlugEditMode(i.channel, char)
 				continue
 			}
 
 			i.SendMessage(string(buf[:n]))
 
 			if char == 8 || char == 127 {
-				if commandBuffer.Len() > 0 {
-					commandBuffer.Truncate(commandBuffer.Len() - 1)
+				if i.CommandBuffer.Len() > 0 {
+					i.CommandBuffer.Truncate(i.CommandBuffer.Len() - 1)
 					i.SendMessage("\b \b")
 				}
 				continue
 			}
 
 			if char == '/' {
-				commandBuffer.Reset()
-				commandBuffer.WriteByte(char)
+				i.CommandBuffer.Reset()
+				i.CommandBuffer.WriteByte(char)
 				continue
 			}
 
-			if commandBuffer.Len() > 0 {
+			if i.CommandBuffer.Len() > 0 {
 				if char == 13 {
-					i.HandleCommand(commandBuffer.String(), &commandBuffer)
+					i.HandleCommand(i.CommandBuffer.String())
 					continue
 				}
-				commandBuffer.WriteByte(char)
+				i.CommandBuffer.WriteByte(char)
 			}
 		}
 	}
 }
 
-func (i *Interaction) HandleSlugEditMode(connection ssh.Channel, char byte, commandBuffer *bytes.Buffer) {
+func (i *Interaction) HandleSlugEditMode(connection ssh.Channel, char byte) {
 	if char == 13 {
 		i.HandleSlugSave(connection)
 	} else if char == 27 {
-		i.HandleSlugCancel(connection, commandBuffer)
+		i.HandleSlugCancel(connection)
 	} else if char == 8 || char == 127 {
 		if len(i.EditSlug) > 0 {
 			i.EditSlug = (i.EditSlug)[:len(i.EditSlug)-1]
@@ -160,13 +165,13 @@ func (i *Interaction) HandleSlugSave(connection ssh.Channel) {
 		return
 	}
 	if isValid {
-		//oldSlug := i.SlugManager.Get()
+		oldSlug := i.SlugManager.Get()
 		newSlug := i.EditSlug
 
-		//if !i.updateClientSlug(oldSlug, newSlug) {
-		//	i.HandleSlugUpdateError()
-		//	return
-		//}
+		if !i.updateClientSlug(oldSlug, newSlug) {
+			i.HandleSlugUpdateError()
+			return
+		}
 
 		_, err := connection.Write([]byte("\r\n\r\n✅ SUBDOMAIN UPDATED ✅\r\n\r\n"))
 		if err != nil {
@@ -251,7 +256,7 @@ func (i *Interaction) HandleSlugSave(connection ssh.Channel) {
 	i.CommandBuffer.Reset()
 }
 
-func (i *Interaction) HandleSlugCancel(connection ssh.Channel, commandBuffer *bytes.Buffer) {
+func (i *Interaction) HandleSlugCancel(connection ssh.Channel) {
 	i.EditMode = false
 	_, err := connection.Write([]byte("\033[H\033[2J"))
 	if err != nil {
@@ -278,7 +283,7 @@ func (i *Interaction) HandleSlugCancel(connection ssh.Channel, commandBuffer *by
 	}
 	i.ShowWelcomeMessage()
 
-	commandBuffer.Reset()
+	i.CommandBuffer.Reset()
 }
 
 func (i *Interaction) HandleSlugUpdateError() {
@@ -296,7 +301,7 @@ func (i *Interaction) HandleSlugUpdateError() {
 	}
 }
 
-func (i *Interaction) HandleCommand(command string, commandBuffer *bytes.Buffer) {
+func (i *Interaction) HandleCommand(command string) {
 	switch command {
 	case "/bye":
 		i.SendMessage("\r\nClosing connection...")
@@ -307,7 +312,7 @@ func (i *Interaction) HandleCommand(command string, commandBuffer *bytes.Buffer)
 		}
 		return
 	case "/help":
-		i.SendMessage("\r\nAvailable commands: /bye, /help, /clear, /slug")
+		i.SendMessage("\r\nAvailable commands: /bye, /help, /clear, /slug\r\n")
 	case "/clear":
 		i.SendMessage("\033[H\033[2J")
 		i.ShowWelcomeMessage()
@@ -323,7 +328,7 @@ func (i *Interaction) HandleCommand(command string, commandBuffer *bytes.Buffer)
 		}
 	case "/slug":
 		if i.Forwarder.GetTunnelType() != types.HTTP {
-			i.SendMessage((fmt.Sprintf("\r\n%s tunnels cannot have custom subdomains", i.Forwarder.GetTunnelType())))
+			i.SendMessage(fmt.Sprintf("\r\n%s tunnels cannot have custom subdomains", i.Forwarder.GetTunnelType()))
 		} else {
 			i.EditMode = true
 			i.EditSlug = i.SlugManager.Get()
@@ -335,7 +340,7 @@ func (i *Interaction) HandleCommand(command string, commandBuffer *bytes.Buffer)
 		i.SendMessage("Unknown command")
 	}
 
-	commandBuffer.Reset()
+	i.CommandBuffer.Reset()
 }
 
 func (i *Interaction) ShowWelcomeMessage() {
@@ -401,6 +406,10 @@ func (i *Interaction) DisplaySlugEditor() {
 	i.SendMessage("\r\n\r\n")
 }
 
+func (i *Interaction) SetSlugModificator(modificator func(oldSlug, newSlug string) bool) {
+	i.updateClientSlug = modificator
+}
+
 func centerText(text string, width int) string {
 	padding := (width - len(text)) / 2
 	if padding < 0 {
@@ -408,6 +417,7 @@ func centerText(text string, width int) string {
 	}
 	return strings.Repeat(" ", padding) + text + strings.Repeat(" ", width-len(text)-padding)
 }
+
 func isValidSlug(slug string) bool {
 	if len(slug) < 3 || len(slug) > 20 {
 		return false
@@ -434,10 +444,6 @@ func waitForKeyPress(connection ssh.Channel) {
 			break
 		}
 	}
-}
-
-var forbiddenSlug = []string{
-	"ping",
 }
 
 func isForbiddenSlug(slug string) bool {

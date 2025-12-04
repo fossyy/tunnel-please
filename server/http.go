@@ -30,13 +30,13 @@ type CustomWriter struct {
 	buf         []byte
 	respHeader  *ResponseHeaderFactory
 	reqHeader   *RequestHeaderFactory
-	interaction interaction.InteractionController
+	interaction interaction.Controller
 	respMW      []ResponseMiddleware
 	reqStartMW  []RequestMiddleware
 	reqEndMW    []RequestMiddleware
 }
 
-func (cw *CustomWriter) SetInteraction(interaction interaction.InteractionController) {
+func (cw *CustomWriter) SetInteraction(interaction interaction.Controller) {
 	cw.interaction = interaction
 }
 
@@ -350,7 +350,7 @@ func forwardRequest(cw *CustomWriter, initialRequest *RequestHeaderFactory, sshS
 		}
 	}
 
-	sshSession.HandleForwardedConnection(cw, channel, cw.RemoteAddr)
+	sshSession.Forwarder.HandleConnection(cw, channel, cw.RemoteAddr)
 	return
 }
 
