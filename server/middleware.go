@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net"
 	"time"
-	"tunnel_pls/session"
+	"tunnel_pls/session/interaction"
 )
 
 type RequestMiddleware interface {
@@ -29,13 +29,13 @@ func (h *TunnelFingerprint) HandleResponse(header *ResponseHeaderFactory, body [
 }
 
 type RequestLogger struct {
-	interaction session.Interaction
+	interaction interaction.InteractionController
 	remoteAddr  net.Addr
 }
 
-func NewRequestLogger(interaction *session.Interaction, remoteAddr net.Addr) *RequestLogger {
+func NewRequestLogger(interaction interaction.InteractionController, remoteAddr net.Addr) *RequestLogger {
 	return &RequestLogger{
-		interaction: *interaction,
+		interaction: interaction,
 		remoteAddr:  remoteAddr,
 	}
 }

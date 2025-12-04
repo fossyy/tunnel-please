@@ -1,4 +1,4 @@
-package session
+package interaction
 
 import (
 	"bytes"
@@ -7,21 +7,35 @@ import (
 	"log"
 	"strings"
 	"time"
+	"tunnel_pls/session/slug"
+	"tunnel_pls/types"
 	"tunnel_pls/utils"
 
 	"golang.org/x/crypto/ssh"
 )
 
+type Lifecycle interface {
+	Close() error
+}
+
 type InteractionController interface {
 	SendMessage(message string)
 	HandleUserInput()
-	HandleCommand(conn ssh.Channel, command string, inSlugEditMode *bool, editSlug *string, buf *bytes.Buffer)
-	HandleSlugEditMode(conn ssh.Channel, inSlugEditMode *bool, editSlug *string, char byte, buf *bytes.Buffer)
-	HandleSlugSave(conn ssh.Channel, inSlugEditMode *bool, editSlug *string, buf *bytes.Buffer)
-	HandleSlugCancel(conn ssh.Channel, inSlugEditMode *bool, buf *bytes.Buffer)
+	HandleCommand(command string, commandBuffer *bytes.Buffer)
+	HandleSlugEditMode(connection ssh.Channel, char byte, commandBuffer *bytes.Buffer)
+	HandleSlugSave(conn ssh.Channel)
+	HandleSlugCancel(connection ssh.Channel, commandBuffer *bytes.Buffer)
 	HandleSlugUpdateError()
 	ShowWelcomeMessage()
 	DisplaySlugEditor()
+	SetChannel(channel ssh.Channel)
+	SetLifecycle(lifecycle Lifecycle)
+}
+
+type Forwarder interface {
+	Close() error
+	GetTunnelType() types.TunnelType
+	GetForwardedPort() uint16
 }
 
 type Interaction struct {
@@ -29,13 +43,17 @@ type Interaction struct {
 	EditMode      bool
 	EditSlug      string
 	channel       ssh.Channel
+	SlugManager   slug.Manager
+	Forwarder     Forwarder
+	Lifecycle     Lifecycle
+}
 
-	getSlug func() string
-	setSlug func(string)
+func (i *Interaction) SetLifecycle(lifecycle Lifecycle) {
+	i.Lifecycle = lifecycle
+}
 
-	session SessionCloser
-
-	forwarder ForwarderInfo
+func (i *Interaction) SetChannel(channel ssh.Channel) {
+	i.channel = channel
 }
 
 func (i *Interaction) SendMessage(message string) {
@@ -142,13 +160,13 @@ func (i *Interaction) HandleSlugSave(connection ssh.Channel) {
 		return
 	}
 	if isValid {
-		oldSlug := i.getSlug()
+		//oldSlug := i.SlugManager.Get()
 		newSlug := i.EditSlug
 
-		if !updateClientSlug(oldSlug, newSlug) {
-			i.HandleSlugUpdateError()
-			return
-		}
+		//if !i.updateClientSlug(oldSlug, newSlug) {
+		//	i.HandleSlugUpdateError()
+		//	return
+		//}
 
 		_, err := connection.Write([]byte("\r\n\r\n✅ SUBDOMAIN UPDATED ✅\r\n\r\n"))
 		if err != nil {
@@ -223,7 +241,7 @@ func (i *Interaction) HandleSlugSave(connection ssh.Channel) {
 	if utils.Getenv("tls_enabled") == "true" {
 		protocol = "https"
 	}
-	_, err = connection.Write([]byte(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, i.getSlug(), domain)))
+	_, err = connection.Write([]byte(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, i.SlugManager.Get(), domain)))
 	if err != nil {
 		log.Printf("failed to write to channel: %v", err)
 		return
@@ -271,7 +289,7 @@ func (i *Interaction) HandleSlugUpdateError() {
 		i.SendMessage(fmt.Sprintf("Disconnecting in %d...\r\n", iter))
 		time.Sleep(1 * time.Second)
 	}
-	err := i.session.Close()
+	err := i.Lifecycle.Close()
 	if err != nil {
 		log.Printf("failed to close session: %v", err)
 		return
@@ -282,7 +300,7 @@ func (i *Interaction) HandleCommand(command string, commandBuffer *bytes.Buffer)
 	switch command {
 	case "/bye":
 		i.SendMessage("\r\nClosing connection...")
-		err := i.session.Close()
+		err := i.Lifecycle.Close()
 		if err != nil {
 			log.Printf("failed to close session: %v", err)
 			return
@@ -294,21 +312,21 @@ func (i *Interaction) HandleCommand(command string, commandBuffer *bytes.Buffer)
 		i.SendMessage("\033[H\033[2J")
 		i.ShowWelcomeMessage()
 		domain := utils.Getenv("domain")
-		if i.forwarder.GetTunnelType() == HTTP {
+		if i.Forwarder.GetTunnelType() == types.HTTP {
 			protocol := "http"
 			if utils.Getenv("tls_enabled") == "true" {
 				protocol = "https"
 			}
-			i.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, i.getSlug(), domain))
+			i.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, i.SlugManager.Get(), domain))
 		} else {
-			i.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s:%d \r\n", i.forwarder.GetTunnelType(), domain, i.forwarder.GetForwardedPort()))
+			i.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s:%d \r\n", i.Forwarder.GetTunnelType(), domain, i.Forwarder.GetForwardedPort()))
 		}
 	case "/slug":
-		if i.forwarder.GetTunnelType() != HTTP {
-			i.SendMessage((fmt.Sprintf("\r\n%s tunnels cannot have custom subdomains", i.forwarder.GetTunnelType())))
+		if i.Forwarder.GetTunnelType() != types.HTTP {
+			i.SendMessage((fmt.Sprintf("\r\n%s tunnels cannot have custom subdomains", i.Forwarder.GetTunnelType())))
 		} else {
 			i.EditMode = true
-			i.EditSlug = i.getSlug()
+			i.EditSlug = i.SlugManager.Get()
 			i.SendMessage("\033[H\033[2J")
 			i.DisplaySlugEditor()
 			i.SendMessage("➤ " + i.EditSlug + "." + utils.Getenv("domain"))
@@ -347,7 +365,7 @@ func (i *Interaction) ShowWelcomeMessage() {
 
 func (i *Interaction) DisplaySlugEditor() {
 	domain := utils.Getenv("domain")
-	fullDomain := i.getSlug() + "." + domain
+	fullDomain := i.SlugManager.Get() + "." + domain
 
 	const paddingRight = 4
 
@@ -383,29 +401,50 @@ func (i *Interaction) DisplaySlugEditor() {
 	i.SendMessage("\r\n\r\n")
 }
 
-func updateClientSlug(oldSlug, newSlug string) bool {
-	clientsMutex.Lock()
-	defer clientsMutex.Unlock()
-
-	if _, exists := Clients[newSlug]; exists && newSlug != oldSlug {
-		return false
-	}
-
-	client, ok := Clients[oldSlug]
-	if !ok {
-		return false
-	}
-
-	delete(Clients, oldSlug)
-	client.Forwarder.setSlug(newSlug)
-	Clients[newSlug] = client
-	return true
-}
-
 func centerText(text string, width int) string {
 	padding := (width - len(text)) / 2
 	if padding < 0 {
 		padding = 0
 	}
 	return strings.Repeat(" ", padding) + text + strings.Repeat(" ", width-len(text)-padding)
+}
+func isValidSlug(slug string) bool {
+	if len(slug) < 3 || len(slug) > 20 {
+		return false
+	}
+
+	if slug[0] == '-' || slug[len(slug)-1] == '-' {
+		return false
+	}
+
+	for _, c := range slug {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+			return false
+		}
+	}
+
+	return true
+}
+
+func waitForKeyPress(connection ssh.Channel) {
+	keyBuf := make([]byte, 1)
+	for {
+		_, err := connection.Read(keyBuf)
+		if err == nil {
+			break
+		}
+	}
+}
+
+var forbiddenSlug = []string{
+	"ping",
+}
+
+func isForbiddenSlug(slug string) bool {
+	for _, s := range forbiddenSlug {
+		if slug == s {
+			return true
+		}
+	}
+	return false
 }
