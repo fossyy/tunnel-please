@@ -98,7 +98,6 @@ func (i *Interaction) HandleUserInput() {
 
 			if char == 8 || char == 127 {
 				if i.InputLength > 0 {
-					//i.CommandBuffer.Truncate(i.CommandBuffer.Len() - 1)
 					i.SendMessage("\b \b")
 				}
 				if i.CommandBuffer.Len() > 0 {

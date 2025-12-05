@@ -38,6 +38,7 @@ type ForwardingController interface {
 	HandleConnection(dst io.ReadWriter, src ssh.Channel, remoteAddr net.Addr)
 	SetLifecycle(lifecycle Lifecycle)
 	CreateForwardedTCPIPPayload(origin net.Addr) []byte
+	WriteBadGatewayResponse(dst io.Writer)
 }
 
 func (f *Forwarder) SetLifecycle(lifecycle Lifecycle) {
@@ -76,7 +77,12 @@ func (f *Forwarder) AcceptTCPConnections() {
 
 func (f *Forwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel, remoteAddr net.Addr) {
 	defer func(src ssh.Channel) {
-		err := src.Close()
+		_, err := io.Copy(io.Discard, src)
+		if err != nil {
+			log.Printf("Failed to discard connection: %v", err)
+		}
+
+		err = src.Close()
 		if err != nil && !errors.Is(err, io.EOF) {
 			log.Printf("Error closing connection: %v", err)
 		}
@@ -120,6 +126,14 @@ func (f *Forwarder) SetListener(listener net.Listener) {
 
 func (f *Forwarder) GetListener() net.Listener {
 	return f.Listener
+}
+
+func (f *Forwarder) WriteBadGatewayResponse(dst io.Writer) {
+	_, err := dst.Write(types.BadGatewayResponse)
+	if err != nil {
+		log.Printf("failed to write Bad Gateway response: %v", err)
+		return
+	}
 }
 
 func (f *Forwarder) Close() error {
