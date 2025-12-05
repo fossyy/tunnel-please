@@ -11,16 +11,13 @@ import (
 	"regexp"
 	"strings"
 	"tunnel_pls/session"
+	"tunnel_pls/types"
 	"tunnel_pls/utils"
-
-	"golang.org/x/crypto/ssh"
 )
 
-var BadGatewayResponse = []byte("HTTP/1.1 502 Bad Gateway\r\n" +
-	"Content-Length: 11\r\n" +
-	"Content-Type: text/plain\r\n\r\n" +
-	"Bad Gateway")
-
+type Interaction interface {
+	SendMessage(message string)
+}
 type CustomWriter struct {
 	RemoteAddr  net.Addr
 	writer      io.Writer
@@ -29,10 +26,14 @@ type CustomWriter struct {
 	buf         []byte
 	respHeader  *ResponseHeaderFactory
 	reqHeader   *RequestHeaderFactory
-	interaction *session.Interaction
+	interaction Interaction
 	respMW      []ResponseMiddleware
 	reqStartMW  []RequestMiddleware
 	reqEndMW    []RequestMiddleware
+}
+
+func (cw *CustomWriter) SetInteraction(interaction Interaction) {
+	cw.interaction = interaction
 }
 
 func (cw *CustomWriter) Read(p []byte) (int, error) {
@@ -125,7 +126,7 @@ func isHTTPHeader(buf []byte) bool {
 }
 
 func (cw *CustomWriter) Write(p []byte) (int, error) {
-	if len(p) == len(BadGatewayResponse) && bytes.Equal(p, BadGatewayResponse) {
+	if len(p) == len(types.BadGatewayResponse) && bytes.Equal(p, types.BadGatewayResponse) {
 		return cw.writer.Write(p)
 	}
 
@@ -177,7 +178,7 @@ func (cw *CustomWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func (cw *CustomWriter) AddInteraction(interaction *session.Interaction) {
+func (cw *CustomWriter) AddInteraction(interaction Interaction) {
 	cw.interaction = interaction
 }
 
@@ -211,7 +212,7 @@ func NewHTTPServer() error {
 func Handler(conn net.Conn) {
 	defer func() {
 		err := conn.Close()
-		if err != nil {
+		if err != nil && !errors.Is(err, net.ErrClosed) {
 			log.Printf("Error closing connection: %v", err)
 			return
 		}
@@ -287,32 +288,18 @@ func Handler(conn net.Conn) {
 		return
 	}
 	cw := NewCustomWriter(conn, dstReader, conn.RemoteAddr())
-
+	cw.SetInteraction(sshSession.Interaction)
 	forwardRequest(cw, reqhf, sshSession)
 	return
 }
 
 func forwardRequest(cw *CustomWriter, initialRequest *RequestHeaderFactory, sshSession *session.SSHSession) {
-	cw.AddInteraction(sshSession.Interaction)
-	originHost, originPort := ParseAddr(cw.RemoteAddr.String())
-	payload := createForwardedTCPIPPayload(originHost, uint16(originPort), sshSession.Forwarder.GetForwardedPort())
-	channel, reqs, err := sshSession.Conn.OpenChannel("forwarded-tcpip", payload)
+	payload := sshSession.Forwarder.CreateForwardedTCPIPPayload(cw.RemoteAddr)
+	channel, reqs, err := sshSession.Lifecycle.GetConnection().OpenChannel("forwarded-tcpip", payload)
 	if err != nil {
 		log.Printf("Failed to open forwarded-tcpip channel: %v", err)
-		sendBadGatewayResponse(cw)
 		return
 	}
-	defer func(channel ssh.Channel) {
-		err := channel.Close()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				sendBadGatewayResponse(cw)
-				return
-			}
-			log.Println("Failed to close connection:", err)
-			return
-		}
-	}(channel)
 
 	go func() {
 		for req := range reqs {
@@ -346,14 +333,6 @@ func forwardRequest(cw *CustomWriter, initialRequest *RequestHeaderFactory, sshS
 		}
 	}
 
-	sshSession.HandleForwardedConnection(cw, channel, cw.RemoteAddr)
+	sshSession.Forwarder.HandleConnection(cw, channel, cw.RemoteAddr)
 	return
-}
-
-func sendBadGatewayResponse(writer io.Writer) {
-	_, err := writer.Write(BadGatewayResponse)
-	if err != nil {
-		log.Printf("failed to write Bad Gateway response: %v", err)
-		return
-	}
 }
