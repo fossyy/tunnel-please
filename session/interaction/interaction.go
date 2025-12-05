@@ -44,6 +44,7 @@ type Forwarder interface {
 }
 
 type Interaction struct {
+	InputLength      int
 	CommandBuffer    *bytes.Buffer
 	EditMode         bool
 	EditSlug         string
@@ -96,12 +97,16 @@ func (i *Interaction) HandleUserInput() {
 			i.SendMessage(string(buf[:n]))
 
 			if char == 8 || char == 127 {
+				if i.InputLength > 0 {
+					i.SendMessage("\b \b")
+				}
 				if i.CommandBuffer.Len() > 0 {
 					i.CommandBuffer.Truncate(i.CommandBuffer.Len() - 1)
-					i.SendMessage("\b \b")
 				}
 				continue
 			}
+
+			i.InputLength += n
 
 			if char == '/' {
 				i.CommandBuffer.Reset()
@@ -111,6 +116,7 @@ func (i *Interaction) HandleUserInput() {
 
 			if i.CommandBuffer.Len() > 0 {
 				if char == 13 {
+					i.SendMessage("\033[K")
 					i.HandleCommand(i.CommandBuffer.String())
 					continue
 				}
@@ -324,7 +330,7 @@ func (i *Interaction) HandleCommand(command string) {
 			}
 			i.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, i.SlugManager.Get(), domain))
 		} else {
-			i.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s:%d \r\n", i.Forwarder.GetTunnelType(), domain, i.Forwarder.GetForwardedPort()))
+			i.SendMessage(fmt.Sprintf("Forwarding your traffic to tcp://%s:%d \r\n", domain, i.Forwarder.GetForwardedPort()))
 		}
 	case "/slug":
 		if i.Forwarder.GetTunnelType() != types.HTTP {
