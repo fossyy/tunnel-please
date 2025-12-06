@@ -30,6 +30,7 @@ type CustomWriter struct {
 	respMW      []ResponseMiddleware
 	reqStartMW  []RequestMiddleware
 	reqEndMW    []RequestMiddleware
+	overflow    []byte
 }
 
 func (cw *CustomWriter) SetInteraction(interaction Interaction) {
@@ -37,9 +38,17 @@ func (cw *CustomWriter) SetInteraction(interaction Interaction) {
 }
 
 func (cw *CustomWriter) Read(p []byte) (int, error) {
+	if len(cw.overflow) > 0 {
+		n := copy(p, cw.overflow)
+		cw.overflow = cw.overflow[n:]
+		if len(cw.overflow) == 0 {
+			cw.overflow = nil
+		}
+		return n, nil
+	}
 	tmp := make([]byte, len(p))
 	read, err := cw.reader.Read(tmp)
-	if err != nil {
+	if read == 0 && err != nil {
 		return 0, err
 	}
 
@@ -48,6 +57,9 @@ func (cw *CustomWriter) Read(p []byte) (int, error) {
 	idx := bytes.Index(tmp, DELIMITER)
 	if idx == -1 {
 		copy(p, tmp)
+		if err != nil {
+			return read, err
+		}
 		return read, nil
 	}
 
@@ -74,18 +86,24 @@ func (cw *CustomWriter) Read(p []byte) (int, error) {
 	}
 
 	for _, m := range cw.reqStartMW {
-		err := m.HandleRequest(reqhf)
-		if err != nil {
-			log.Printf("Error when applying request middleware: %v", err)
-			return 0, err
+		if mwErr := m.HandleRequest(reqhf); mwErr != nil {
+			log.Printf("Error when applying request middleware: %v", mwErr)
+			return 0, mwErr
 		}
 	}
 
 	cw.reqHeader = reqhf
 	finalHeader := reqhf.Finalize()
 
-	n := copy(p, finalHeader)
-	n += copy(p[n:], body)
+	combined := append(finalHeader, body...)
+
+	n := copy(p, combined)
+
+	if n > len(p) {
+		cw.overflow = make([]byte, len(combined)-n)
+		copy(cw.overflow, combined[n:])
+		log.Printf("output buffer too small (%d vs %d)", len(p), n)
+	}
 
 	return n, nil
 }
@@ -106,9 +124,7 @@ var responseLine = regexp.MustCompile(`^HTTP/\d\.\d \d{3} .+`)
 
 func isHTTPHeader(buf []byte) bool {
 	lines := bytes.Split(buf, []byte("\r\n"))
-	if len(lines) < 1 {
-		return false
-	}
+
 	startLine := string(lines[0])
 	if !requestLine.MatchString(startLine) && !responseLine.MatchString(startLine) {
 		return false
@@ -118,7 +134,8 @@ func isHTTPHeader(buf []byte) bool {
 		if len(line) == 0 {
 			break
 		}
-		if !bytes.Contains(line, []byte(":")) {
+		colonIdx := bytes.IndexByte(line, ':')
+		if colonIdx <= 0 {
 			return false
 		}
 	}
@@ -130,52 +147,53 @@ func (cw *CustomWriter) Write(p []byte) (int, error) {
 		return cw.writer.Write(p)
 	}
 
-	cw.buf = append(cw.buf, p...)
-	// TODO: implement middleware buat cache system dll
-	if idx := bytes.Index(cw.buf, DELIMITER); idx != -1 {
-		header := cw.buf[:idx+len(DELIMITER)]
-		body := cw.buf[idx+len(DELIMITER):]
-
-		if isHTTPHeader(header) {
-			resphf := NewResponseHeaderFactory(header)
-			for _, m := range cw.respMW {
-				err := m.HandleResponse(resphf, body)
-				if err != nil {
-					log.Printf("Cannot apply middleware: %s\n", err)
-					return 0, err
-				}
-			}
-			header = resphf.Finalize()
-			cw.respHeader = resphf
-			_, err := cw.writer.Write(header)
-			if err != nil {
-				return 0, err
-			}
-
-			if len(body) > 0 {
-				_, err := cw.writer.Write(body)
-				if err != nil {
-					return 0, err
-				}
-			}
-			cw.buf = nil
-			return len(p), nil
+	if cw.respHeader != nil {
+		n, err := cw.writer.Write(p)
+		if err != nil {
+			return n, err
 		}
+		return n, nil
 	}
 
-	cw.buf = nil
-	n, err := cw.writer.Write(p)
-	if err != nil {
+	cw.buf = append(cw.buf, p...)
+
+	idx := bytes.Index(cw.buf, DELIMITER)
+	if idx == -1 {
+		return len(p), nil
+	}
+
+	header := cw.buf[:idx+len(DELIMITER)]
+	body := cw.buf[idx+len(DELIMITER):]
+
+	if !isHTTPHeader(header) {
+		n, err := cw.writer.Write(cw.buf)
+		cw.buf = nil
 		return n, err
 	}
+
+	resphf := NewResponseHeaderFactory(header)
 	for _, m := range cw.respMW {
-		err := m.HandleResponse(cw.respHeader, p)
+		err := m.HandleResponse(resphf, body)
 		if err != nil {
 			log.Printf("Cannot apply middleware: %s\n", err)
 			return 0, err
 		}
 	}
-	return n, nil
+	header = resphf.Finalize()
+	cw.respHeader = resphf
+
+	_, err := cw.writer.Write(header)
+	if err != nil {
+		return 0, err
+	}
+	if len(body) > 0 {
+		_, err = cw.writer.Write(body)
+		if err != nil {
+			return 0, err
+		}
+	}
+	cw.buf = nil
+	return len(p), nil
 }
 
 func (cw *CustomWriter) AddInteraction(interaction Interaction) {
@@ -318,9 +336,11 @@ func forwardRequest(cw *CustomWriter, initialRequest *RequestHeaderFactory, sshS
 	//TODO: Implement wrapper func buat add/remove middleware
 	fingerprintMiddleware := NewTunnelFingerprint()
 	loggerMiddleware := NewRequestLogger(cw.interaction, cw.RemoteAddr)
+	forwardedForMiddleware := NewForwardedFor(cw.RemoteAddr)
+
 	cw.respMW = append(cw.respMW, fingerprintMiddleware)
 	cw.reqStartMW = append(cw.reqStartMW, loggerMiddleware)
-
+	cw.reqStartMW = append(cw.reqStartMW, forwardedForMiddleware)
 	//TODO: Tambah req Middleware
 	cw.reqEndMW = nil
 	cw.reqHeader = initialRequest

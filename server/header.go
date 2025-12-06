@@ -149,8 +149,6 @@ func (req *RequestHeaderFactory) Finalize() []byte {
 	buf.Write(req.startLine)
 	buf.WriteString("\r\n")
 
-	req.headers["X-HF"] = "modified"
-
 	for key, val := range req.headers {
 		buf.WriteString(key)
 		buf.WriteString(": ")
