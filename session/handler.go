@@ -160,21 +160,29 @@ func (s *SSHSession) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 		err := req.Reply(false, nil)
 		if err != nil {
 			log.Println("Failed to reply to request:", err)
-			return
+		}
+		return
+	}
+
+	if !registerClient(slug, s) {
+		log.Printf("Failed to register client with slug: %s", slug)
+		err := req.Reply(false, nil)
+		if err != nil {
+			log.Println("Failed to reply to request:", err)
 		}
 		return
 	}
 
 	s.SlugManager.Set(slug)
-	registerClient(slug, s)
 
 	buf := new(bytes.Buffer)
-	err := binary.Write(buf, binary.BigEndian, uint32(80))
+	err := binary.Write(buf, binary.BigEndian, uint32(portToBind))
 	if err != nil {
-		log.Println("Failed to reply to request:", err)
+		log.Println("Failed to write port to buffer:", err)
+		unregisterClient(slug)
 		return
 	}
-	log.Printf("HTTP forwarding approved on port: %d", 80)
+	log.Printf("HTTP forwarding approved on port: %d", portToBind)
 
 	domain := utils.Getenv("domain")
 	protocol := "http"
@@ -184,9 +192,11 @@ func (s *SSHSession) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 
 	s.Interaction.ShowWelcomeMessage()
 	s.Interaction.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s\r\n", protocol, slug, domain))
+
 	err = req.Reply(true, buf.Bytes())
 	if err != nil {
 		log.Println("Failed to reply to request:", err)
+		unregisterClient(slug)
 		return
 	}
 }
@@ -194,7 +204,6 @@ func (s *SSHSession) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind uint16) {
 	s.Forwarder.SetType(types.TCP)
 	log.Printf("Requested forwarding on %s:%d", addr, portToBind)
-
 	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", portToBind))
 	if err != nil {
 		s.Interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port.\r\n", portToBind))
@@ -209,25 +218,36 @@ func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind 
 		}
 		return
 	}
-	s.Forwarder.SetListener(listener)
-	s.Forwarder.SetForwardedPort(portToBind)
-	s.Interaction.ShowWelcomeMessage()
-	s.Interaction.SendMessage(fmt.Sprintf("Forwarding your traffic to tcp://%s:%d \r\n", utils.Getenv("domain"), s.Forwarder.GetForwardedPort()))
-
-	go s.Forwarder.AcceptTCPConnections()
 
 	buf := new(bytes.Buffer)
 	err = binary.Write(buf, binary.BigEndian, uint32(portToBind))
 	if err != nil {
-		log.Println("Failed to reply to request:", err)
+		log.Println("Failed to write port to buffer:", err)
+		err = listener.Close()
+		if err != nil {
+			log.Printf("Failed to close listener: %s", err)
+			return
+		}
 		return
 	}
+
 	log.Printf("TCP forwarding approved on port: %d", portToBind)
 	err = req.Reply(true, buf.Bytes())
 	if err != nil {
 		log.Println("Failed to reply to request:", err)
+		err = listener.Close()
+		if err != nil {
+			log.Printf("Failed to close listener: %s", err)
+			return
+		}
 		return
 	}
+
+	s.Forwarder.SetListener(listener)
+	s.Forwarder.SetForwardedPort(portToBind)
+	s.Interaction.ShowWelcomeMessage()
+	s.Interaction.SendMessage(fmt.Sprintf("Forwarding your traffic to tcp://%s:%d \r\n", utils.Getenv("domain"), s.Forwarder.GetForwardedPort()))
+	go s.Forwarder.AcceptTCPConnections()
 }
 
 func generateUniqueSlug() string {

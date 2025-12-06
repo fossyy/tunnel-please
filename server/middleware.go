@@ -19,9 +19,7 @@ type TunnelFingerprint struct{}
 func NewTunnelFingerprint() *TunnelFingerprint {
 	return &TunnelFingerprint{}
 }
-func (h *TunnelFingerprint) HandleRequest(header *RequestHeaderFactory) error {
-	return nil
-}
+
 func (h *TunnelFingerprint) HandleResponse(header *ResponseHeaderFactory, body []byte) error {
 	header.Set("Server", "Tunnel Please")
 	return nil
@@ -44,7 +42,22 @@ func (rl *RequestLogger) HandleRequest(header *RequestHeaderFactory) error {
 	return nil
 }
 
-func (rl *RequestLogger) HandleResponse(header *ResponseHeaderFactory, body []byte) error { return nil }
+type ForwardedFor struct {
+	addr net.Addr
+}
+
+func NewForwardedFor(addr net.Addr) *ForwardedFor {
+	return &ForwardedFor{addr: addr}
+}
+
+func (ff *ForwardedFor) HandleRequest(header *RequestHeaderFactory) error {
+	host, _, err := net.SplitHostPort(ff.addr.String())
+	if err != nil {
+		return err
+	}
+	header.Set("X-Forwarded-For", host)
+	return nil
+}
 
 //TODO: Implement caching atau enggak
 //const maxCacheSize = 50 * 1024 * 1024

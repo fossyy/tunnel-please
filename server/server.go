@@ -16,7 +16,7 @@ type Server struct {
 	HttpServer *http.Server
 }
 
-func NewServer(config ssh.ServerConfig) *Server {
+func NewServer(config *ssh.ServerConfig) *Server {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", utils.Getenv("port")))
 	if err != nil {
 		log.Fatalf("failed to listen on port 2200: %v", err)
@@ -39,7 +39,7 @@ func NewServer(config ssh.ServerConfig) *Server {
 	}()
 	return &Server{
 		Conn:   &listener,
-		Config: &config,
+		Config: config,
 	}
 }
 

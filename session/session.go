@@ -30,6 +30,8 @@ type SSHSession struct {
 	Interaction interaction.Controller
 	Forwarder   forwarder.ForwardingController
 	SlugManager slug.Manager
+
+	channelOnce sync.Once
 }
 
 func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel) {
@@ -61,7 +63,7 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 	interactionManager.SetSlugModificator(updateClientSlug)
 	forwarderManager.SetLifecycle(lifecycleManager)
 	lifecycleManager.SetUnregisterClient(unregisterClient)
-	
+
 	session := &SSHSession{
 		Lifecycle:   lifecycleManager,
 		Interaction: interactionManager,
@@ -73,20 +75,23 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 		go session.Lifecycle.WaitForRunningStatus()
 
 		for channel := range sshChan {
-			ch, reqs, _ := channel.Accept()
-			if session.Lifecycle.GetChannel() == nil {
+			ch, reqs, err := channel.Accept()
+			if err != nil {
+				log.Printf("failed to accept channel: %v", err)
+				continue
+			}
+			session.channelOnce.Do(func() {
 				session.Lifecycle.SetChannel(ch)
 				session.Interaction.SetChannel(ch)
 				session.Lifecycle.SetStatus(types.SETUP)
 				go session.HandleGlobalRequest(forwardingReq)
-			}
+			})
+
 			go session.HandleGlobalRequest(reqs)
 		}
-		err := session.Lifecycle.Close()
-		if err != nil {
+		if err := session.Lifecycle.Close(); err != nil {
 			log.Printf("failed to close session: %v", err)
 		}
-		return
 	}()
 }
 
