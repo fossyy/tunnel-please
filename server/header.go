@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io"
 	"strings"
 )
 
@@ -28,8 +27,7 @@ type RequestHeaderFactory struct {
 	headers   map[string]string
 }
 
-func NewRequestHeaderFactory(r io.Reader) (*RequestHeaderFactory, error) {
-	br := bufio.NewReader(r)
+func NewRequestHeaderFactory(br *bufio.Reader) (*RequestHeaderFactory, error) {
 	header := &RequestHeaderFactory{
 		headers: make(map[string]string),
 	}

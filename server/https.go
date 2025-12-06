@@ -26,7 +26,8 @@ func NewHTTPSServer() error {
 
 	go func() {
 		for {
-			conn, err := ln.Accept()
+			var conn net.Conn
+			conn, err = ln.Accept()
 			if err != nil {
 				if errors.Is(err, net.ErrClosed) {
 					log.Println("https server closed")
@@ -60,14 +61,9 @@ func HandlerTLS(conn net.Conn) {
 
 	host := strings.Split(reqhf.Get("Host"), ".")
 	if len(host) < 1 {
-		_, err := conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
+		_, err = conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
 		if err != nil {
 			log.Println("Failed to write 400 Bad Request:", err)
-			return
-		}
-		err = conn.Close()
-		if err != nil {
-			log.Println("Failed to close connection:", err)
 			return
 		}
 		return
@@ -76,8 +72,7 @@ func HandlerTLS(conn net.Conn) {
 	slug := host[0]
 
 	if slug == "ping" {
-		// TODO: implement cors
-		_, err := conn.Write([]byte(
+		_, err = conn.Write([]byte(
 			"HTTP/1.1 200 OK\r\n" +
 				"Content-Length: 0\r\n" +
 				"Connection: close\r\n" +
@@ -95,18 +90,13 @@ func HandlerTLS(conn net.Conn) {
 
 	sshSession, ok := session.Clients[slug]
 	if !ok {
-		_, err := conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
+		_, err = conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
 			fmt.Sprintf("Location: https://tunnl.live/tunnel-not-found?slug=%s\r\n", slug) +
 			"Content-Length: 0\r\n" +
 			"Connection: close\r\n" +
 			"\r\n"))
 		if err != nil {
 			log.Println("Failed to write 301 Moved Permanently:", err)
-			return
-		}
-		err = conn.Close()
-		if err != nil {
-			log.Println("Failed to close connection:", err)
 			return
 		}
 		return

@@ -72,7 +72,7 @@ func (cw *CustomWriter) Read(p []byte) (int, error) {
 	}
 
 	for _, m := range cw.reqEndMW {
-		err := m.HandleRequest(cw.reqHeader)
+		err = m.HandleRequest(cw.reqHeader)
 		if err != nil {
 			log.Printf("Error when applying request middleware: %v", err)
 			return 0, err
@@ -212,7 +212,8 @@ func NewHTTPServer() error {
 	}
 	go func() {
 		for {
-			conn, err := listener.Accept()
+			var conn net.Conn
+			conn, err = listener.Accept()
 			if err != nil {
 				if errors.Is(err, net.ErrClosed) {
 					return
@@ -257,7 +258,7 @@ func Handler(conn net.Conn) {
 	slug := host[0]
 
 	if redirectTLS {
-		_, err := conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
+		_, err = conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
 			fmt.Sprintf("Location: https://%s.%s/\r\n", slug, utils.Getenv("domain")) +
 			"Content-Length: 0\r\n" +
 			"Connection: close\r\n" +
@@ -270,8 +271,7 @@ func Handler(conn net.Conn) {
 	}
 
 	if slug == "ping" {
-		// TODO: implement cors
-		_, err := conn.Write([]byte(
+		_, err = conn.Write([]byte(
 			"HTTP/1.1 200 OK\r\n" +
 				"Content-Length: 0\r\n" +
 				"Connection: close\r\n" +
@@ -289,18 +289,13 @@ func Handler(conn net.Conn) {
 
 	sshSession, ok := session.Clients[slug]
 	if !ok {
-		_, err := conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
+		_, err = conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
 			fmt.Sprintf("Location: https://tunnl.live/tunnel-not-found?slug=%s\r\n", slug) +
 			"Content-Length: 0\r\n" +
 			"Connection: close\r\n" +
 			"\r\n"))
 		if err != nil {
 			log.Println("Failed to write 301 Moved Permanently:", err)
-			return
-		}
-		err = conn.Close()
-		if err != nil {
-			log.Println("Failed to close connection:", err)
 			return
 		}
 		return
@@ -346,7 +341,7 @@ func forwardRequest(cw *CustomWriter, initialRequest *RequestHeaderFactory, sshS
 	cw.reqHeader = initialRequest
 
 	for _, m := range cw.reqStartMW {
-		err := m.HandleRequest(cw.reqHeader)
+		err = m.HandleRequest(cw.reqHeader)
 		if err != nil {
 			log.Printf("Error handling request: %v", err)
 			return
