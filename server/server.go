@@ -24,7 +24,7 @@ func NewServer(config *ssh.ServerConfig) *Server {
 	}
 	if utils.Getenv("tls_enabled") == "true" {
 		go func() {
-			err := NewHTTPSServer()
+			err = NewHTTPSServer()
 			if err != nil {
 				log.Fatalf("failed to start https server: %v", err)
 			}
@@ -32,7 +32,7 @@ func NewServer(config *ssh.ServerConfig) *Server {
 		}()
 	}
 	go func() {
-		err := NewHTTPServer()
+		err = NewHTTPServer()
 		if err != nil {
 			log.Fatalf("failed to start http server: %v", err)
 		}

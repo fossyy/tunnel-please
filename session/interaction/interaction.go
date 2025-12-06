@@ -52,6 +52,7 @@ type Interaction struct {
 	SlugManager      slug.Manager
 	Forwarder        Forwarder
 	Lifecycle        Lifecycle
+	pendingExit      bool
 	updateClientSlug func(oldSlug, newSlug string) bool
 }
 
@@ -94,6 +95,27 @@ func (i *Interaction) HandleUserInput() {
 				continue
 			}
 
+			if i.pendingExit {
+				if char != 3 {
+					i.pendingExit = false
+					i.SendMessage("Operation canceled.\r\n")
+				}
+			}
+
+			if char == 3 {
+				if i.pendingExit {
+					i.SendMessage("Closing connection...\r\n")
+					err = i.Lifecycle.Close()
+					if err != nil {
+						log.Printf("failed to close session: %v", err)
+						return
+					}
+					return
+				}
+				i.SendMessage("Please press Ctrl+C again to disconnect.\r\n")
+				i.pendingExit = true
+			}
+
 			i.SendMessage(string(buf[:n]))
 
 			if char == 8 || char == 127 {
@@ -122,6 +144,11 @@ func (i *Interaction) HandleUserInput() {
 				}
 				i.CommandBuffer.WriteByte(char)
 			}
+
+			if char == 13 {
+				i.SendMessage("\033[K")
+			}
+
 		}
 	}
 }
@@ -129,7 +156,7 @@ func (i *Interaction) HandleUserInput() {
 func (i *Interaction) HandleSlugEditMode(connection ssh.Channel, char byte) {
 	if char == 13 {
 		i.HandleSlugSave(connection)
-	} else if char == 27 {
+	} else if char == 27 || char == 3 {
 		i.HandleSlugCancel(connection)
 	} else if char == 8 || char == 127 {
 		if len(i.EditSlug) > 0 {
@@ -310,7 +337,7 @@ func (i *Interaction) HandleSlugUpdateError() {
 func (i *Interaction) HandleCommand(command string) {
 	switch command {
 	case "/bye":
-		i.SendMessage("\r\nClosing connection...")
+		i.SendMessage("Closing connection...\r\n")
 		err := i.Lifecycle.Close()
 		if err != nil {
 			log.Printf("failed to close session: %v", err)
@@ -343,7 +370,7 @@ func (i *Interaction) HandleCommand(command string) {
 			i.SendMessage("➤ " + i.EditSlug + "." + utils.Getenv("domain"))
 		}
 	default:
-		i.SendMessage("Unknown command")
+		i.SendMessage("Unknown command\r\n")
 	}
 
 	i.CommandBuffer.Reset()
