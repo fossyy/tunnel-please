@@ -26,27 +26,32 @@ type Controller interface {
 	SendMessage(message string)
 	HandleUserInput()
 	HandleCommand(command string)
-	HandleSlugEditMode(connection ssh.Channel, char byte)
-	HandleSlugSave(conn ssh.Channel)
-	HandleSlugCancel(connection ssh.Channel)
+	HandleSlugEditMode(char byte)
+	HandleSlugSave()
+	HandleSlugCancel()
 	HandleSlugUpdateError()
 	ShowWelcomeMessage()
 	DisplaySlugEditor()
 	SetChannel(channel ssh.Channel)
 	SetLifecycle(lifecycle Lifecycle)
 	SetSlugModificator(func(oldSlug, newSlug string) bool)
+	WaitForKeyPress()
+	ShowForwardingMessage()
 }
 
 type Forwarder interface {
 	Close() error
 	GetTunnelType() types.TunnelType
 	GetForwardedPort() uint16
+	DropAllForwarder() int
+	GetForwarderCount() int
 }
 
 type Interaction struct {
 	InputLength      int
 	CommandBuffer    *bytes.Buffer
-	EditMode         bool
+	InteractiveMode  bool
+	InteractionType  types.InteractionType
 	EditSlug         string
 	channel          ssh.Channel
 	SlugManager      slug.Manager
@@ -76,8 +81,7 @@ func (i *Interaction) SendMessage(message string) {
 
 func (i *Interaction) HandleUserInput() {
 	buf := make([]byte, 1)
-	i.EditMode = false
-
+	i.InteractiveMode = false
 	for {
 		n, err := i.channel.Read(buf)
 		if err != nil {
@@ -89,9 +93,12 @@ func (i *Interaction) HandleUserInput() {
 
 		if n > 0 {
 			char := buf[0]
-
-			if i.EditMode {
-				i.HandleSlugEditMode(i.channel, char)
+			if i.InteractiveMode {
+				if i.InteractionType == types.Slug {
+					i.HandleSlugEditMode(char)
+				} else if i.InteractionType == types.Drop {
+					i.HandleDropMode(char)
+				}
 				continue
 			}
 
@@ -148,55 +155,34 @@ func (i *Interaction) HandleUserInput() {
 			if char == 13 {
 				i.SendMessage("\033[K")
 			}
-
 		}
 	}
 }
 
-func (i *Interaction) HandleSlugEditMode(connection ssh.Channel, char byte) {
+func (i *Interaction) HandleSlugEditMode(char byte) {
 	if char == 13 {
-		i.HandleSlugSave(connection)
+		i.HandleSlugSave()
 	} else if char == 27 || char == 3 {
-		i.HandleSlugCancel(connection)
+		i.HandleSlugCancel()
 	} else if char == 8 || char == 127 {
 		if len(i.EditSlug) > 0 {
 			i.EditSlug = (i.EditSlug)[:len(i.EditSlug)-1]
-			_, err := connection.Write([]byte("\r\033[K"))
-			if err != nil {
-				log.Printf("failed to write to channel: %v", err)
-				return
-			}
-			_, err = connection.Write([]byte("➤ " + i.EditSlug + "." + utils.Getenv("domain")))
-			if err != nil {
-				log.Printf("failed to write to channel: %v", err)
-				return
-			}
+			i.SendMessage("\r\033[K")
+			i.SendMessage("➤ " + i.EditSlug + "." + utils.Getenv("domain"))
 		}
 	} else if char >= 32 && char <= 126 {
 		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '-' {
 			i.EditSlug += string(char)
-			_, err := connection.Write([]byte("\r\033[K"))
-			if err != nil {
-				log.Printf("failed to write to channel: %v", err)
-				return
-			}
-			_, err = connection.Write([]byte("➤ " + i.EditSlug + "." + utils.Getenv("domain")))
-			if err != nil {
-				log.Printf("failed to write to channel: %v", err)
-				return
-			}
+			i.SendMessage("\r\033[K")
+			i.SendMessage("➤ " + i.EditSlug + "." + utils.Getenv("domain"))
 		}
 	}
 }
 
-func (i *Interaction) HandleSlugSave(connection ssh.Channel) {
+func (i *Interaction) HandleSlugSave() {
 	isValid := isValidSlug(i.EditSlug)
 
-	_, err := connection.Write([]byte("\033[H\033[2J"))
-	if err != nil {
-		log.Printf("failed to write to channel: %v", err)
-		return
-	}
+	i.SendMessage("\033[H\033[2J")
 	if isValid {
 		oldSlug := i.SlugManager.Get()
 		newSlug := i.EditSlug
@@ -206,72 +192,23 @@ func (i *Interaction) HandleSlugSave(connection ssh.Channel) {
 			return
 		}
 
-		_, err := connection.Write([]byte("\r\n\r\n✅ SUBDOMAIN UPDATED ✅\r\n\r\n"))
-		if err != nil {
-			log.Printf("failed to write to channel: %v", err)
-			return
-		}
-		_, err = connection.Write([]byte("Your new address is: " + newSlug + "." + utils.Getenv("domain") + "\r\n\r\n"))
-		if err != nil {
-			log.Printf("failed to write to channel: %v", err)
-			return
-		}
-		_, err = connection.Write([]byte("Press any key to continue...\r\n"))
-		if err != nil {
-			log.Printf("failed to write to channel: %v", err)
-			return
-		}
+		i.SendMessage("\r\n\r\n✅ SUBDOMAIN UPDATED ✅\r\n\r\n")
+		i.SendMessage("Your new address is: " + newSlug + "." + utils.Getenv("domain") + "\r\n\r\n")
+		i.SendMessage("Press any key to continue...\r\n")
 	} else if isForbiddenSlug(i.EditSlug) {
-		_, err := connection.Write([]byte("\r\n\r\n❌ FORBIDDEN SUBDOMAIN ❌\r\n\r\n"))
-		if err != nil {
-			log.Printf("failed to write to channel: %v", err)
-			return
-		}
-		_, err = connection.Write([]byte("This subdomain is not allowed.\r\n"))
-		if err != nil {
-			log.Printf("failed to write to channel: %v", err)
-			return
-		}
-		_, err = connection.Write([]byte("Please try a different subdomain.\r\n\r\n"))
-		if err != nil {
-			log.Printf("failed to write to channel: %v", err)
-			return
-		}
-		_, err = connection.Write([]byte("Press any key to continue...\r\n"))
-		if err != nil {
-			log.Printf("failed to write to channel: %v", err)
-			return
-		}
+		i.SendMessage("\r\n\r\n❌ FORBIDDEN SUBDOMAIN ❌\r\n\r\n")
+		i.SendMessage("This subdomain is not allowed.\r\n")
+		i.SendMessage("Please try a different subdomain.\r\n\r\n")
+		i.SendMessage("Press any key to continue...\r\n")
 	} else {
-		_, err := connection.Write([]byte("\r\n\r\n❌ INVALID SUBDOMAIN ❌\r\n\r\n"))
-		if err != nil {
-			log.Printf("failed to write to channel: %v", err)
-			return
-		}
-		_, err = connection.Write([]byte("Use only lowercase letters, numbers, and hyphens.\r\n"))
-		if err != nil {
-			log.Printf("failed to write to channel: %v", err)
-			return
-		}
-		_, err = connection.Write([]byte("Length must be 3-20 characters and cannot start or end with a hyphen.\r\n\r\n"))
-		if err != nil {
-			log.Printf("failed to write to channel: %v", err)
-			return
-		}
-		_, err = connection.Write([]byte("Press any key to continue...\r\n"))
-		if err != nil {
-			log.Printf("failed to write to channel: %v", err)
-			return
-		}
+		i.SendMessage("\r\n\r\n❌ INVALID SUBDOMAIN ❌\r\n\r\n")
+		i.SendMessage("Use only lowercase letters, numbers, and hyphens.\r\n")
+		i.SendMessage("Length must be 3-20 characters and cannot start or end with a hyphen.\r\n\r\n")
+		i.SendMessage("Press any key to continue...\r\n")
 	}
 
-	waitForKeyPress(connection)
-
-	_, err = connection.Write([]byte("\033[H\033[2J"))
-	if err != nil {
-		log.Printf("failed to write to channel: %v", err)
-		return
-	}
+	i.WaitForKeyPress()
+	i.SendMessage("\033[H\033[2J")
 	i.ShowWelcomeMessage()
 
 	domain := utils.Getenv("domain")
@@ -279,43 +216,23 @@ func (i *Interaction) HandleSlugSave(connection ssh.Channel) {
 	if utils.Getenv("tls_enabled") == "true" {
 		protocol = "https"
 	}
-	_, err = connection.Write([]byte(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, i.SlugManager.Get(), domain)))
-	if err != nil {
-		log.Printf("failed to write to channel: %v", err)
-		return
-	}
+	i.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, i.SlugManager.Get(), domain))
 
-	i.EditMode = false
+	i.InteractiveMode = false
 	i.CommandBuffer.Reset()
 }
 
-func (i *Interaction) HandleSlugCancel(connection ssh.Channel) {
-	i.EditMode = false
-	_, err := connection.Write([]byte("\033[H\033[2J"))
-	if err != nil {
-		log.Printf("failed to write to channel: %v", err)
-		return
-	}
-	_, err = connection.Write([]byte("\r\n\r\n⚠️ SUBDOMAIN EDIT CANCELLED ⚠️\r\n\r\n"))
-	if err != nil {
-		log.Printf("failed to write to channel: %v", err)
-		return
-	}
-	_, err = connection.Write([]byte("Press any key to continue...\r\n"))
-	if err != nil {
-		log.Printf("failed to write to channel: %v", err)
-		return
-	}
+func (i *Interaction) HandleSlugCancel() {
+	i.InteractiveMode = false
+	i.SendMessage("\033[H\033[2J")
+	i.SendMessage("\r\n\r\n⚠️ SUBDOMAIN EDIT CANCELLED ⚠️\r\n\r\n")
+	i.SendMessage("Press any key to continue...\r\n")
 
-	waitForKeyPress(connection)
+	i.WaitForKeyPress()
 
-	_, err = connection.Write([]byte("\033[H\033[2J"))
-	if err != nil {
-		log.Printf("failed to write to channel: %v", err)
-		return
-	}
+	i.SendMessage("\033[H\033[2J")
 	i.ShowWelcomeMessage()
-
+	i.ShowForwardingMessage()
 	i.CommandBuffer.Reset()
 }
 
@@ -349,31 +266,102 @@ func (i *Interaction) HandleCommand(command string) {
 	case "/clear":
 		i.SendMessage("\033[H\033[2J")
 		i.ShowWelcomeMessage()
-		domain := utils.Getenv("domain")
-		if i.Forwarder.GetTunnelType() == types.HTTP {
-			protocol := "http"
-			if utils.Getenv("tls_enabled") == "true" {
-				protocol = "https"
-			}
-			i.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, i.SlugManager.Get(), domain))
-		} else {
-			i.SendMessage(fmt.Sprintf("Forwarding your traffic to tcp://%s:%d \r\n", domain, i.Forwarder.GetForwardedPort()))
-		}
+		i.ShowForwardingMessage()
 	case "/slug":
 		if i.Forwarder.GetTunnelType() != types.HTTP {
 			i.SendMessage(fmt.Sprintf("\r\n%s tunnels cannot have custom subdomains", i.Forwarder.GetTunnelType()))
 		} else {
-			i.EditMode = true
+			i.InteractiveMode = true
+			i.InteractionType = types.Slug
 			i.EditSlug = i.SlugManager.Get()
 			i.SendMessage("\033[H\033[2J")
 			i.DisplaySlugEditor()
 			i.SendMessage("➤ " + i.EditSlug + "." + utils.Getenv("domain"))
 		}
+	case "/drop":
+		i.InteractiveMode = true
+		i.InteractionType = types.Drop
+		i.SendMessage("\033[H\033[2J")
+		i.ShowDropMessage()
 	default:
 		i.SendMessage("Unknown command\r\n")
 	}
 
 	i.CommandBuffer.Reset()
+}
+
+func (i *Interaction) ShowForwardingMessage() {
+	domain := utils.Getenv("domain")
+	if i.Forwarder.GetTunnelType() == types.HTTP {
+		protocol := "http"
+		if utils.Getenv("tls_enabled") == "true" {
+			protocol = "https"
+		}
+		i.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, i.SlugManager.Get(), domain))
+	} else {
+		i.SendMessage(fmt.Sprintf("Forwarding your traffic to tcp://%s:%d \r\n", domain, i.Forwarder.GetForwardedPort()))
+	}
+}
+
+func (i *Interaction) HandleDropMode(char byte) {
+	if char == 13 || char == 121 || char == 89 {
+		count := i.Forwarder.DropAllForwarder()
+		i.SendMessage("\033[H\033[2J")
+		i.SendMessage(fmt.Sprintf("Dropped %d forwarders\r\n", count))
+		i.SendMessage("Press any key to continue...\r\n")
+		i.InteractiveMode = false
+		i.InteractionType = ""
+		i.WaitForKeyPress()
+		i.SendMessage("\033[H\033[2J")
+		i.ShowWelcomeMessage()
+		i.ShowForwardingMessage()
+	} else if char == 27 || char == 110 || char == 78 || char == 3 {
+		i.SendMessage("\033[H\033[2J")
+		i.SendMessage(fmt.Sprintf("Dropping canceled.\r\n"))
+		i.SendMessage("Press any key to continue...\r\n")
+		i.InteractiveMode = false
+		i.InteractionType = ""
+		i.WaitForKeyPress()
+		i.SendMessage("\033[H\033[2J")
+		i.ShowWelcomeMessage()
+		i.ShowForwardingMessage()
+	}
+}
+
+func (i *Interaction) ShowDropMessage() {
+	const paddingRight = 4
+
+	confirmText := fmt.Sprintf("  ║  Drop ALL %d active connections?", i.Forwarder.GetForwarderCount())
+	boxWidth := len(confirmText) + paddingRight + 1
+	if boxWidth < 50 {
+		boxWidth = 50
+	}
+
+	topBorder := "  ╔" + strings.Repeat("═", boxWidth-4) + "╗\r\n"
+	title := centerText("DROP CONFIRMATION", boxWidth-4)
+	header := "  ║" + title + "║\r\n"
+	midBorder := "  ╠" + strings.Repeat("═", boxWidth-4) + "╣\r\n"
+	emptyLine := "  ║" + strings.Repeat(" ", boxWidth-4) + "║\r\n"
+
+	confirmLine := confirmText + strings.Repeat(" ", boxWidth-len(confirmText)+1) + "║\r\n"
+
+	controlText := "  ║  [Enter/Y] Confirm    [N/Esc] Cancel"
+	controlLine := controlText + strings.Repeat(" ", boxWidth-len(controlText)+1) + "║\r\n"
+
+	bottomBorder := "  ╚" + strings.Repeat("═", boxWidth-4) + "╝\r\n"
+
+	asciiArt := topBorder +
+		header +
+		midBorder +
+		emptyLine +
+		confirmLine +
+		emptyLine +
+		controlLine +
+		emptyLine +
+		bottomBorder
+
+	i.SendMessage("\r\n" + asciiArt)
+	i.SendMessage("\r\n\r\n")
 }
 
 func (i *Interaction) ShowWelcomeMessage() {
@@ -393,6 +381,7 @@ func (i *Interaction) ShowWelcomeMessage() {
 		`        - '/help'  : Show this help message`,
 		`        - '/clear' : Clear the current line`,
 		`        - '/slug'  : Set custom subdomain`,
+		`        - '/drop'  : Drop all active forwarders`,
 	}
 
 	for _, line := range asciiArt {
@@ -443,6 +432,16 @@ func (i *Interaction) SetSlugModificator(modificator func(oldSlug, newSlug strin
 	i.updateClientSlug = modificator
 }
 
+func (i *Interaction) WaitForKeyPress() {
+	keyBuf := make([]byte, 1)
+	for {
+		_, err := i.channel.Read(keyBuf)
+		if err == nil {
+			break
+		}
+	}
+}
+
 func centerText(text string, width int) string {
 	padding := (width - len(text)) / 2
 	if padding < 0 {
@@ -467,16 +466,6 @@ func isValidSlug(slug string) bool {
 	}
 
 	return true
-}
-
-func waitForKeyPress(connection ssh.Channel) {
-	keyBuf := make([]byte, 1)
-	for {
-		_, err := connection.Read(keyBuf)
-		if err == nil {
-			break
-		}
-	}
 }
 
 func isForbiddenSlug(slug string) bool {

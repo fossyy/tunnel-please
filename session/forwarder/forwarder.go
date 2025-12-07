@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -15,11 +16,12 @@ import (
 )
 
 type Forwarder struct {
-	Listener      net.Listener
-	TunnelType    types.TunnelType
-	ForwardedPort uint16
-	SlugManager   slug.Manager
-	Lifecycle     Lifecycle
+	Listener        net.Listener
+	TunnelType      types.TunnelType
+	ForwardedPort   uint16
+	SlugManager     slug.Manager
+	Lifecycle       Lifecycle
+	ActiveForwarder []chan struct{}
 }
 
 type Lifecycle interface {
@@ -39,6 +41,27 @@ type ForwardingController interface {
 	SetLifecycle(lifecycle Lifecycle)
 	CreateForwardedTCPIPPayload(origin net.Addr) []byte
 	WriteBadGatewayResponse(dst io.Writer)
+	AddActiveForwarder(drop chan struct{})
+	DropAllForwarder() int
+	GetForwarderCount() int
+}
+
+func (f *Forwarder) AddActiveForwarder(drop chan struct{}) {
+	f.ActiveForwarder = append(f.ActiveForwarder, drop)
+}
+
+func (f *Forwarder) DropAllForwarder() int {
+	total := 0
+	for _, d := range f.ActiveForwarder {
+		close(d)
+		total += 1
+	}
+	f.ActiveForwarder = nil
+	return total
+}
+
+func (f *Forwarder) GetForwarderCount() int {
+	return len(f.ActiveForwarder)
 }
 
 func (f *Forwarder) SetLifecycle(lifecycle Lifecycle) {
@@ -76,6 +99,7 @@ func (f *Forwarder) AcceptTCPConnections() {
 }
 
 func (f *Forwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel, remoteAddr net.Addr) {
+	drop := make(chan struct{})
 	defer func(src ssh.Channel) {
 		_, err := io.Copy(io.Discard, src)
 		if err != nil {
@@ -95,6 +119,16 @@ func (f *Forwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel, remoteA
 			log.Printf("Error copying from conn.Reader to channel: %v", err)
 		}
 	}()
+
+	go func() {
+		select {
+		case <-drop:
+			fmt.Println("Closinggggg")
+			return
+		}
+	}()
+
+	f.AddActiveForwarder(drop)
 
 	_, err := io.Copy(dst, src)
 
