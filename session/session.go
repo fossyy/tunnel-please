@@ -43,12 +43,12 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 		SlugManager:   slugManager,
 	}
 	interactionManager := &interaction.Interaction{
-		CommandBuffer: bytes.NewBuffer(make([]byte, 0, 20)),
-		EditMode:      false,
-		EditSlug:      "",
-		SlugManager:   slugManager,
-		Forwarder:     forwarderManager,
-		Lifecycle:     nil,
+		CommandBuffer:   bytes.NewBuffer(make([]byte, 0, 20)),
+		InteractiveMode: false,
+		EditSlug:        "",
+		SlugManager:     slugManager,
+		Forwarder:       forwarderManager,
+		Lifecycle:       nil,
 	}
 	lifecycleManager := &lifecycle.Lifecycle{
 		Status:      "",
