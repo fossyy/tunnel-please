@@ -71,28 +71,25 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 		SlugManager: slugManager,
 	}
 
-	go func() {
-		go session.Lifecycle.WaitForRunningStatus()
-
-		for channel := range sshChan {
-			ch, reqs, err := channel.Accept()
-			if err != nil {
-				log.Printf("failed to accept channel: %v", err)
-				continue
-			}
-			session.channelOnce.Do(func() {
-				session.Lifecycle.SetChannel(ch)
-				session.Interaction.SetChannel(ch)
-				session.Lifecycle.SetStatus(types.SETUP)
-				go session.HandleGlobalRequest(forwardingReq)
-			})
-
-			go session.HandleGlobalRequest(reqs)
+	for channel := range sshChan {
+		ch, reqs, err := channel.Accept()
+		if err != nil {
+			log.Printf("failed to accept channel: %v", err)
+			continue
 		}
-		if err := session.Lifecycle.Close(); err != nil {
-			log.Printf("failed to close session: %v", err)
-		}
-	}()
+		session.channelOnce.Do(func() {
+			session.Lifecycle.SetChannel(ch)
+			session.Interaction.SetChannel(ch)
+			session.Lifecycle.SetStatus(types.SETUP)
+			go session.HandleGlobalRequest(forwardingReq)
+			session.Lifecycle.WaitForRunningStatus()
+		})
+
+		go session.HandleGlobalRequest(reqs)
+	}
+	if err := session.Lifecycle.Close(); err != nil {
+		log.Printf("failed to close session: %v", err)
+	}
 }
 
 func updateClientSlug(oldSlug, newSlug string) bool {
