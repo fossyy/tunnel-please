@@ -30,7 +30,7 @@ jobs:
           context: .
           push: true
           tags: |
-            git.fossy.my.id/${{ secrets.DOCKER_USERNAME }}/tunnl_please:latest
+            git.fossy.my.id/${{ secrets.DOCKER_USERNAME }}/tunnel-please:latest
           platforms: linux/amd64,linux/arm64
         if: github.ref == 'refs/heads/main'
 
@@ -40,6 +40,6 @@ jobs:
           context: .
           push: true
           tags: |
-            git.fossy.my.id/${{ secrets.DOCKER_USERNAME }}/tunnl_please:staging
+            git.fossy.my.id/${{ secrets.DOCKER_USERNAME }}/tunnel-please:staging
           platforms: linux/amd64,linux/arm64
         if: github.ref == 'refs/heads/staging'
