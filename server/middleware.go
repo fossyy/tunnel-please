@@ -1,9 +1,7 @@
 package server
 
 import (
-	"fmt"
 	"net"
-	"time"
 )
 
 type RequestMiddleware interface {
@@ -28,18 +26,6 @@ func (h *TunnelFingerprint) HandleResponse(header *ResponseHeaderFactory, body [
 type RequestLogger struct {
 	interaction Interaction
 	remoteAddr  net.Addr
-}
-
-func NewRequestLogger(interaction Interaction, remoteAddr net.Addr) *RequestLogger {
-	return &RequestLogger{
-		interaction: interaction,
-		remoteAddr:  remoteAddr,
-	}
-}
-
-func (rl *RequestLogger) HandleRequest(header *RequestHeaderFactory) error {
-	rl.interaction.SendMessage(fmt.Sprintf("\033[32m%s %s -> %s %s \033[0m\r\n", time.Now().UTC().Format(time.RFC3339), rl.remoteAddr.String(), header.Method, header.Path))
-	return nil
 }
 
 type ForwardedFor struct {
