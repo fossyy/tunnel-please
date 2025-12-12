@@ -171,7 +171,7 @@ func (f *Forwarder) WriteBadGatewayResponse(dst io.Writer) {
 }
 
 func (f *Forwarder) Close() error {
-	if f.GetTunnelType() != types.HTTP {
+	if f.GetListener() != nil {
 		return f.Listener.Close()
 	}
 	return nil
