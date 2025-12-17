@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -16,12 +15,11 @@ import (
 )
 
 type Forwarder struct {
-	Listener        net.Listener
-	TunnelType      types.TunnelType
-	ForwardedPort   uint16
-	SlugManager     slug.Manager
-	Lifecycle       Lifecycle
-	ActiveForwarder []chan struct{}
+	Listener      net.Listener
+	TunnelType    types.TunnelType
+	ForwardedPort uint16
+	SlugManager   slug.Manager
+	Lifecycle     Lifecycle
 }
 
 type Lifecycle interface {
@@ -41,27 +39,6 @@ type ForwardingController interface {
 	SetLifecycle(lifecycle Lifecycle)
 	CreateForwardedTCPIPPayload(origin net.Addr) []byte
 	WriteBadGatewayResponse(dst io.Writer)
-	AddActiveForwarder(drop chan struct{})
-	DropAllForwarder() int
-	GetForwarderCount() int
-}
-
-func (f *Forwarder) AddActiveForwarder(drop chan struct{}) {
-	f.ActiveForwarder = append(f.ActiveForwarder, drop)
-}
-
-func (f *Forwarder) DropAllForwarder() int {
-	total := 0
-	for _, d := range f.ActiveForwarder {
-		close(d)
-		total += 1
-	}
-	f.ActiveForwarder = nil
-	return total
-}
-
-func (f *Forwarder) GetForwarderCount() int {
-	return len(f.ActiveForwarder)
 }
 
 func (f *Forwarder) SetLifecycle(lifecycle Lifecycle) {
@@ -82,7 +59,10 @@ func (f *Forwarder) AcceptTCPConnections() {
 		channel, reqs, err := f.Lifecycle.GetConnection().OpenChannel("forwarded-tcpip", payload)
 		if err != nil {
 			log.Printf("Failed to open forwarded-tcpip channel: %v", err)
-			return
+			if closeErr := conn.Close(); closeErr != nil {
+				log.Printf("Failed to close connection: %v", closeErr)
+			}
+			continue
 		}
 
 		go func() {
@@ -99,8 +79,7 @@ func (f *Forwarder) AcceptTCPConnections() {
 }
 
 func (f *Forwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel, remoteAddr net.Addr) {
-	drop := make(chan struct{})
-	defer func(src ssh.Channel) {
+	defer func() {
 		_, err := io.Copy(io.Discard, src)
 		if err != nil {
 			log.Printf("Failed to discard connection: %v", err)
@@ -108,34 +87,38 @@ func (f *Forwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel, remoteA
 
 		err = src.Close()
 		if err != nil && !errors.Is(err, io.EOF) {
-			log.Printf("Error closing connection: %v", err)
+			log.Printf("Error closing source channel: %v", err)
 		}
-	}(src)
+
+		if closer, ok := dst.(io.Closer); ok {
+			err = closer.Close()
+			if err != nil && !errors.Is(err, io.EOF) {
+				log.Printf("Error closing destination connection: %v", err)
+			}
+		}
+	}()
+
 	log.Printf("Handling new forwarded connection from %s", remoteAddr)
+
+	done := make(chan struct{}, 2)
 
 	go func() {
 		_, err := io.Copy(src, dst)
 		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
 			log.Printf("Error copying from conn.Reader to channel: %v", err)
 		}
+		done <- struct{}{}
 	}()
 
 	go func() {
-		select {
-		case <-drop:
-			fmt.Println("Closinggggg")
-			return
+		_, err := io.Copy(dst, src)
+		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+			log.Printf("Error copying from channel to conn.Writer: %v", err)
 		}
+		done <- struct{}{}
 	}()
 
-	f.AddActiveForwarder(drop)
-
-	_, err := io.Copy(dst, src)
-
-	if err != nil && !errors.Is(err, io.EOF) {
-		log.Printf("Error copying from channel to conn.Writer: %v", err)
-	}
-	return
+	<-done
 }
 
 func (f *Forwarder) SetType(tunnelType types.TunnelType) {

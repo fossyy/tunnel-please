@@ -298,13 +298,22 @@ func forwardRequest(cw *CustomWriter, initialRequest *RequestHeaderFactory, sshS
 	channel, reqs, err := sshSession.Lifecycle.GetConnection().OpenChannel("forwarded-tcpip", payload)
 	if err != nil {
 		log.Printf("Failed to open forwarded-tcpip channel: %v", err)
+		if closer, ok := cw.writer.(io.Closer); ok {
+			if closeErr := closer.Close(); closeErr != nil {
+				log.Printf("Failed to close connection: %v", closeErr)
+			}
+		}
 		return
 	}
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Panic in request handler goroutine: %v", r)
+			}
+		}()
 		for req := range reqs {
-			err := req.Reply(false, nil)
-			if err != nil {
+			if err := req.Reply(false, nil); err != nil {
 				log.Printf("Failed to reply to request: %v", err)
 				return
 			}
