@@ -19,7 +19,6 @@ type InteractionType string
 
 const (
 	Slug InteractionType = "SLUG"
-	Drop InteractionType = "DROP"
 )
 
 var BadGatewayResponse = []byte("HTTP/1.1 502 Bad Gateway\r\n" +

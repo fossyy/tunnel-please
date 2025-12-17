@@ -39,8 +39,6 @@ type Forwarder interface {
 	Close() error
 	GetTunnelType() types.TunnelType
 	GetForwardedPort() uint16
-	DropAllForwarder() int
-	GetForwarderCount() int
 }
 
 type Interaction struct {
@@ -118,8 +116,6 @@ func (i *Interaction) handleInteractiveMode(char byte) {
 	switch i.InteractionType {
 	case types.Slug:
 		i.HandleSlugEditMode(char)
-	case types.Drop:
-		i.HandleDropMode(char)
 	}
 }
 
@@ -271,8 +267,17 @@ func (i *Interaction) returnToMainScreen() {
 }
 
 func (i *Interaction) HandleSlugCancel() {
+	i.SendMessage(clearScreen)
+	i.SendMessage("\r\n\r\n⚠️ SUBDOMAIN EDIT CANCELLED ⚠️\r\n\r\n")
+	i.SendMessage("Press any key to continue...\r\n")
+
 	i.InteractiveMode = false
-	i.showMessageAndWait("\r\n\r\n⚠️ SUBDOMAIN EDIT CANCELLED ⚠️\r\n\r\n")
+	i.InteractionType = ""
+	i.WaitForKeyPress()
+
+	i.SendMessage(clearScreen)
+	i.ShowWelcomeMessage()
+	i.ShowForwardingMessage()
 }
 
 func (i *Interaction) HandleSlugUpdateError() {
@@ -295,7 +300,6 @@ func (i *Interaction) HandleCommand(command string) {
 		"/help":  i.handleHelpCommand,
 		"/clear": i.handleClearCommand,
 		"/slug":  i.handleSlugCommand,
-		"/drop":  i.handleDropCommand,
 	}
 
 	if handler, exists := handlers[command]; exists {
@@ -315,7 +319,7 @@ func (i *Interaction) handleByeCommand() {
 }
 
 func (i *Interaction) handleHelpCommand() {
-	i.SendMessage("\r\nAvailable commands: /bye, /help, /clear, /slug, /drop\r\n")
+	i.SendMessage("\r\nAvailable commands: /bye, /help, /clear, /slug\r\n")
 }
 
 func (i *Interaction) handleClearCommand() {
@@ -340,13 +344,6 @@ func (i *Interaction) handleSlugCommand() {
 	i.SendMessage("➤ " + i.EditSlug + "." + domain)
 }
 
-func (i *Interaction) handleDropCommand() {
-	i.InteractiveMode = true
-	i.InteractionType = types.Drop
-	i.SendMessage(clearScreen)
-	i.ShowDropMessage()
-}
-
 func (i *Interaction) ShowForwardingMessage() {
 	domain := utils.Getenv("domain")
 
@@ -359,64 +356,6 @@ func (i *Interaction) ShowForwardingMessage() {
 	} else {
 		i.SendMessage(fmt.Sprintf("Forwarding your traffic to tcp://%s:%d \r\n", domain, i.Forwarder.GetForwardedPort()))
 	}
-}
-
-func (i *Interaction) HandleDropMode(char byte) {
-	switch {
-	case char == enterChar || char == 'y' || char == 'Y':
-		i.executeDropAll()
-	case char == escapeChar || char == 'n' || char == 'N' || char == ctrlC:
-		i.cancelDrop()
-	}
-}
-
-func (i *Interaction) executeDropAll() {
-	count := i.Forwarder.DropAllForwarder()
-	message := fmt.Sprintf("Dropped %d forwarders\r\n", count)
-	i.showMessageAndWait(message)
-}
-
-func (i *Interaction) cancelDrop() {
-	i.showMessageAndWait("Dropping canceled.\r\n")
-}
-
-func (i *Interaction) showMessageAndWait(message string) {
-	i.SendMessage(clearScreen)
-	i.SendMessage(message)
-	i.SendMessage("Press any key to continue...\r\n")
-
-	i.InteractiveMode = false
-	i.InteractionType = ""
-	i.WaitForKeyPress()
-
-	i.SendMessage(clearScreen)
-	i.ShowWelcomeMessage()
-	i.ShowForwardingMessage()
-}
-
-func (i *Interaction) ShowDropMessage() {
-	confirmText := fmt.Sprintf("  ║  Drop ALL %d active connections?", i.Forwarder.GetForwarderCount())
-	boxWidth := calculateBoxWidth(confirmText)
-
-	box := buildDropConfirmationBox(boxWidth, confirmText)
-	i.SendMessage("\r\n" + box + "\r\n\r\n")
-}
-
-func buildDropConfirmationBox(boxWidth int, confirmText string) string {
-	topBorder := "  ╔" + strings.Repeat("═", boxWidth-4) + "╗\r\n"
-	title := centerText("DROP CONFIRMATION", boxWidth-4)
-	header := "  ║" + title + "║\r\n"
-	midBorder := "  ╠" + strings.Repeat("═", boxWidth-4) + "╣\r\n"
-	emptyLine := "  ║" + strings.Repeat(" ", boxWidth-4) + "║\r\n"
-
-	confirmLine := confirmText + strings.Repeat(" ", boxWidth-len(confirmText)+1) + "║\r\n"
-
-	controlText := "  ║  [Enter/Y] Confirm    [N/Esc] Cancel"
-	controlLine := controlText + strings.Repeat(" ", boxWidth-len(controlText)+1) + "║\r\n"
-
-	bottomBorder := "  ╚" + strings.Repeat("═", boxWidth-4) + "╝\r\n"
-
-	return topBorder + header + midBorder + emptyLine + confirmLine + emptyLine + controlLine + emptyLine + bottomBorder
 }
 
 func (i *Interaction) ShowWelcomeMessage() {
@@ -436,7 +375,6 @@ func (i *Interaction) ShowWelcomeMessage() {
 		`        - '/help'  : Show this help message`,
 		`        - '/clear' : Clear the current line`,
 		`        - '/slug'  : Set custom subdomain`,
-		`        - '/drop'  : Drop all active forwarders`,
 	}
 
 	for _, line := range asciiArt {
@@ -481,6 +419,10 @@ func (i *Interaction) WaitForKeyPress() {
 	for {
 		_, err := i.channel.Read(keyBuf)
 		if err == nil {
+			break
+		}
+		if err != nil {
+			log.Printf("Error reading keypress: %v", err)
 			break
 		}
 	}
