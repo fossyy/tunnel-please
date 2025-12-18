@@ -29,6 +29,7 @@ The following environment variables can be configured in the `.env` file:
 | `SSH_PRIVATE_KEY` | Path to SSH private key (auto-generated if missing) | `certs/id_rsa` | No |
 | `CORS_LIST` | Comma-separated list of allowed CORS origins | - | No |
 | `ALLOWED_PORTS` | Port range for TCP tunnels (e.g., 40000-41000) | `40000-41000` | No |
+| `BUFFER_SIZE` | Buffer size for io.Copy operations in bytes (4096-1048576) | `32768` | No |
 | `PPROF_ENABLED` | Enable pprof profiling server | `false` | No |
 | `PPROF_PORT` | Port for pprof server | `6060` | No |
 

@@ -9,6 +9,7 @@ import (
 	mathrand "math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +61,15 @@ func Getenv(key, defaultValue string) string {
 	env.value[key] = val
 
 	return val
+}
+
+func GetBufferSize() int {
+	sizeStr := Getenv("BUFFER_SIZE", "32768")
+	size, err := strconv.Atoi(sizeStr)
+	if err != nil || size < 4096 || size > 1048576 {
+		return 32768
+	}
+	return size
 }
 
 func GenerateSSHKeyIfNotExist(keyPath string) error {

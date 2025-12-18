@@ -8,11 +8,26 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"sync"
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
+	"tunnel_pls/utils"
 
 	"golang.org/x/crypto/ssh"
 )
+
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		bufSize := utils.GetBufferSize()
+		return make([]byte, bufSize)
+	},
+}
+
+func copyWithBuffer(dst io.Writer, src io.Reader) (written int64, err error) {
+	buf := bufferPool.Get().([]byte)
+	defer bufferPool.Put(buf)
+	return io.CopyBuffer(dst, src, buf)
+}
 
 type Forwarder struct {
 	Listener      net.Listener
@@ -103,7 +118,7 @@ func (f *Forwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel, remoteA
 	done := make(chan struct{}, 2)
 
 	go func() {
-		_, err := io.Copy(src, dst)
+		_, err := copyWithBuffer(src, dst)
 		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
 			log.Printf("Error copying from conn.Reader to channel: %v", err)
 		}
@@ -111,7 +126,7 @@ func (f *Forwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel, remoteA
 	}()
 
 	go func() {
-		_, err := io.Copy(dst, src)
+		_, err := copyWithBuffer(dst, src)
 		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
 			log.Printf("Error copying from channel to conn.Writer: %v", err)
 		}
