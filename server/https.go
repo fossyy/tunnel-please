@@ -13,7 +13,7 @@ import (
 )
 
 func NewHTTPSServer() error {
-	cert, err := tls.LoadX509KeyPair(utils.Getenv("cert_loc"), utils.Getenv("key_loc"))
+	cert, err := tls.LoadX509KeyPair(utils.Getenv("CERT_LOC", "certs/cert.pem"), utils.Getenv("KEY_LOC", "certs/privkey.pem"))
 	if err != nil {
 		return err
 	}

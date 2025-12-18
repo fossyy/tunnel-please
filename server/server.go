@@ -17,12 +17,12 @@ type Server struct {
 }
 
 func NewServer(config *ssh.ServerConfig) *Server {
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", utils.Getenv("port")))
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", utils.Getenv("PORT", "2200")))
 	if err != nil {
 		log.Fatalf("failed to listen on port 2200: %v", err)
 		return nil
 	}
-	if utils.Getenv("tls_enabled") == "true" {
+	if utils.Getenv("TLS_ENABLED", "false") == "true" {
 		go func() {
 			err = NewHTTPSServer()
 			if err != nil {

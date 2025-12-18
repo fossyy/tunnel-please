@@ -194,7 +194,7 @@ func NewHTTPServer() error {
 	if err != nil {
 		return errors.New("Error listening: " + err.Error())
 	}
-	if utils.Getenv("tls_enabled") == "true" && utils.Getenv("tls_redirect") == "true" {
+	if utils.Getenv("TLS_ENABLED", "false") == "true" && utils.Getenv("TLS_REDIRECT", "false") == "true" {
 		redirectTLS = true
 	}
 	go func() {
@@ -246,7 +246,7 @@ func Handler(conn net.Conn) {
 
 	if redirectTLS {
 		_, err = conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
-			fmt.Sprintf("Location: https://%s.%s/\r\n", slug, utils.Getenv("domain")) +
+			fmt.Sprintf("Location: https://%s.%s/\r\n", slug, utils.Getenv("DOMAIN", "localhost")) +
 			"Content-Length: 0\r\n" +
 			"Connection: close\r\n" +
 			"\r\n"))
