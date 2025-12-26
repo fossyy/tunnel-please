@@ -26,6 +26,10 @@ The following environment variables can be configured in the `.env` file:
 | `TLS_REDIRECT` | Redirect HTTP to HTTPS | `false` | No |
 | `CERT_LOC` | Path to TLS certificate | `certs/cert.pem` | No |
 | `KEY_LOC` | Path to TLS private key | `certs/privkey.pem` | No |
+| `CERT_STORAGE_PATH` | Path for CertMagic certificate storage | `certs/certmagic` | No |
+| `ACME_EMAIL` | Email for Let's Encrypt registration | `admin@<DOMAIN>` | No |
+| `CF_API_TOKEN` | Cloudflare API token for DNS-01 challenge | - | Yes (if auto-cert) |
+| `ACME_STAGING` | Use Let's Encrypt staging server | `false` | No |
 | `SSH_PRIVATE_KEY` | Path to SSH private key (auto-generated if missing) | `certs/id_rsa` | No |
 | `CORS_LIST` | Comma-separated list of allowed CORS origins | - | No |
 | `ALLOWED_PORTS` | Port range for TCP tunnels (e.g., 40000-41000) | `40000-41000` | No |
@@ -34,6 +38,36 @@ The following environment variables can be configured in the `.env` file:
 | `PPROF_PORT` | Port for pprof server | `6060` | No |
 
 **Note:** All environment variables now use UPPERCASE naming. The application includes sensible defaults for all variables, so you can run it without a `.env` file for basic functionality.
+
+### Automatic TLS Certificate Management
+
+The server supports automatic TLS certificate generation and renewal using [CertMagic](https://github.com/caddyserver/certmagic) with Cloudflare DNS-01 challenge. This is required for wildcard certificate support (`*.yourdomain.com`).
+
+**How it works:**
+1. If user-provided certificates (`CERT_LOC`, `KEY_LOC`) exist and cover both `DOMAIN` and `*.DOMAIN`, they will be used
+2. If certificates are missing, expired, expiring within 30 days, or don't cover the required domains, CertMagic will automatically obtain new certificates from Let's Encrypt
+3. Certificates are automatically renewed before expiration
+4. User-provided certificates support hot-reload (changes detected every 30 seconds)
+
+**Cloudflare API Token Setup:**
+
+To use automatic certificate generation, you need a Cloudflare API token with the following permissions:
+
+1. Go to [Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens)
+2. Click "Create Token"
+3. Use "Create Custom Token" with these permissions:
+   - **Zone → Zone → Read** (for all zones or specific zone)
+   - **Zone → DNS → Edit** (for all zones or specific zone)
+4. Copy the token and set it as `CF_API_TOKEN` environment variable
+
+**Example configuration for automatic certificates:**
+```env
+DOMAIN=example.com
+TLS_ENABLED=true
+CF_API_TOKEN=your_cloudflare_api_token_here
+ACME_EMAIL=admin@example.com
+# ACME_STAGING=true  # Uncomment for testing to avoid rate limits
+```
 
 ### SSH Key Auto-Generation
 

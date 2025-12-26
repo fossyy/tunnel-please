@@ -3,3 +3,4 @@ id_rsa*
 .idea
 .env
 tmp
+certs
