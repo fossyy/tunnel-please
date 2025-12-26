@@ -19,9 +19,6 @@ var blockedReservedPorts = []uint16{1080, 1433, 1521, 1900, 2049, 3306, 3389, 54
 func (s *SSHSession) HandleGlobalRequest(GlobalRequest <-chan *ssh.Request) {
 	for req := range GlobalRequest {
 		switch req.Type {
-		case "tcpip-forward":
-			s.HandleTCPIPForward(req)
-			return
 		case "shell", "pty-req", "window-change":
 			err := req.Reply(true, nil)
 			if err != nil {

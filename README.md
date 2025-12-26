@@ -39,6 +39,21 @@ The following environment variables can be configured in the `.env` file:
 
 If the SSH private key specified in `SSH_PRIVATE_KEY` doesn't exist, the application will automatically generate a new 4096-bit RSA key pair at the specified location. This makes it easier to get started without manually creating SSH keys.
 
+### Memory Optimization
+
+The application uses a buffer pool with controlled buffer sizes to prevent excessive memory usage under high concurrent loads. The `BUFFER_SIZE` environment variable controls the size of buffers used for io.Copy operations:
+
+- **Default:** 32768 bytes (32 KB) - Good balance for most scenarios
+- **Minimum:** 4096 bytes (4 KB) - Lower memory usage, more CPU overhead
+- **Maximum:** 1048576 bytes (1 MB) - Higher throughput, more memory usage
+
+**Recommended settings based on load:**
+- **Low traffic (<100 concurrent):** `BUFFER_SIZE=32768` (default)
+- **High traffic (>100 concurrent):** `BUFFER_SIZE=16384` or `BUFFER_SIZE=8192`
+- **Very high traffic (>1000 concurrent):** `BUFFER_SIZE=8192` or `BUFFER_SIZE=4096`
+
+The buffer pool reuses buffers across connections, preventing memory fragmentation and reducing garbage collection pressure.
+
 ### Profiling with pprof
 
 To enable profiling for performance analysis:

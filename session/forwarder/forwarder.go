@@ -9,6 +9,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
 	"tunnel_pls/utils"
@@ -70,26 +71,52 @@ func (f *Forwarder) AcceptTCPConnections() {
 			log.Printf("Error accepting connection: %v", err)
 			continue
 		}
-		payload := f.CreateForwardedTCPIPPayload(conn.RemoteAddr())
-		channel, reqs, err := f.Lifecycle.GetConnection().OpenChannel("forwarded-tcpip", payload)
-		if err != nil {
-			log.Printf("Failed to open forwarded-tcpip channel: %v", err)
+
+		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			log.Printf("Failed to set connection deadline: %v", err)
 			if closeErr := conn.Close(); closeErr != nil {
 				log.Printf("Failed to close connection: %v", closeErr)
 			}
 			continue
 		}
 
+		payload := f.CreateForwardedTCPIPPayload(conn.RemoteAddr())
+
+		type channelResult struct {
+			channel ssh.Channel
+			reqs    <-chan *ssh.Request
+			err     error
+		}
+		resultChan := make(chan channelResult, 1)
+
 		go func() {
-			for req := range reqs {
-				err := req.Reply(false, nil)
-				if err != nil {
-					log.Printf("Failed to reply to request: %v", err)
-					return
-				}
-			}
+			channel, reqs, err := f.Lifecycle.GetConnection().OpenChannel("forwarded-tcpip", payload)
+			resultChan <- channelResult{channel, reqs, err}
 		}()
-		go f.HandleConnection(conn, channel, conn.RemoteAddr())
+
+		select {
+		case result := <-resultChan:
+			if result.err != nil {
+				log.Printf("Failed to open forwarded-tcpip channel: %v", result.err)
+				if closeErr := conn.Close(); closeErr != nil {
+					log.Printf("Failed to close connection: %v", closeErr)
+				}
+				continue
+			}
+
+			if err := conn.SetDeadline(time.Time{}); err != nil {
+				log.Printf("Failed to clear connection deadline: %v", err)
+			}
+
+			go ssh.DiscardRequests(result.reqs)
+			go f.HandleConnection(conn, result.channel, conn.RemoteAddr())
+
+		case <-time.After(5 * time.Second):
+			log.Printf("Timeout opening forwarded-tcpip channel")
+			if closeErr := conn.Close(); closeErr != nil {
+				log.Printf("Failed to close connection: %v", closeErr)
+			}
+		}
 	}
 }
 
