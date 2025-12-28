@@ -8,11 +8,27 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"sync"
+	"time"
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
+	"tunnel_pls/utils"
 
 	"golang.org/x/crypto/ssh"
 )
+
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		bufSize := utils.GetBufferSize()
+		return make([]byte, bufSize)
+	},
+}
+
+func copyWithBuffer(dst io.Writer, src io.Reader) (written int64, err error) {
+	buf := bufferPool.Get().([]byte)
+	defer bufferPool.Put(buf)
+	return io.CopyBuffer(dst, src, buf)
+}
 
 type Forwarder struct {
 	Listener      net.Listener
@@ -55,26 +71,52 @@ func (f *Forwarder) AcceptTCPConnections() {
 			log.Printf("Error accepting connection: %v", err)
 			continue
 		}
-		payload := f.CreateForwardedTCPIPPayload(conn.RemoteAddr())
-		channel, reqs, err := f.Lifecycle.GetConnection().OpenChannel("forwarded-tcpip", payload)
-		if err != nil {
-			log.Printf("Failed to open forwarded-tcpip channel: %v", err)
+
+		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			log.Printf("Failed to set connection deadline: %v", err)
 			if closeErr := conn.Close(); closeErr != nil {
 				log.Printf("Failed to close connection: %v", closeErr)
 			}
 			continue
 		}
 
+		payload := f.CreateForwardedTCPIPPayload(conn.RemoteAddr())
+
+		type channelResult struct {
+			channel ssh.Channel
+			reqs    <-chan *ssh.Request
+			err     error
+		}
+		resultChan := make(chan channelResult, 1)
+
 		go func() {
-			for req := range reqs {
-				err := req.Reply(false, nil)
-				if err != nil {
-					log.Printf("Failed to reply to request: %v", err)
-					return
-				}
-			}
+			channel, reqs, err := f.Lifecycle.GetConnection().OpenChannel("forwarded-tcpip", payload)
+			resultChan <- channelResult{channel, reqs, err}
 		}()
-		go f.HandleConnection(conn, channel, conn.RemoteAddr())
+
+		select {
+		case result := <-resultChan:
+			if result.err != nil {
+				log.Printf("Failed to open forwarded-tcpip channel: %v", result.err)
+				if closeErr := conn.Close(); closeErr != nil {
+					log.Printf("Failed to close connection: %v", closeErr)
+				}
+				continue
+			}
+
+			if err := conn.SetDeadline(time.Time{}); err != nil {
+				log.Printf("Failed to clear connection deadline: %v", err)
+			}
+
+			go ssh.DiscardRequests(result.reqs)
+			go f.HandleConnection(conn, result.channel, conn.RemoteAddr())
+
+		case <-time.After(5 * time.Second):
+			log.Printf("Timeout opening forwarded-tcpip channel")
+			if closeErr := conn.Close(); closeErr != nil {
+				log.Printf("Failed to close connection: %v", closeErr)
+			}
+		}
 	}
 }
 
@@ -103,7 +145,7 @@ func (f *Forwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel, remoteA
 	done := make(chan struct{}, 2)
 
 	go func() {
-		_, err := io.Copy(src, dst)
+		_, err := copyWithBuffer(src, dst)
 		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
 			log.Printf("Error copying from conn.Reader to channel: %v", err)
 		}
@@ -111,7 +153,7 @@ func (f *Forwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel, remoteA
 	}()
 
 	go func() {
-		_, err := io.Copy(dst, src)
+		_, err := copyWithBuffer(dst, src)
 		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
 			log.Printf("Error copying from channel to conn.Writer: %v", err)
 		}

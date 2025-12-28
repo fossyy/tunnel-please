@@ -19,9 +19,6 @@ var blockedReservedPorts = []uint16{1080, 1433, 1521, 1900, 2049, 3306, 3389, 54
 func (s *SSHSession) HandleGlobalRequest(GlobalRequest <-chan *ssh.Request) {
 	for req := range GlobalRequest {
 		switch req.Type {
-		case "tcpip-forward":
-			s.HandleTCPIPForward(req)
-			return
 		case "shell", "pty-req", "window-change":
 			err := req.Reply(true, nil)
 			if err != nil {
@@ -179,9 +176,9 @@ func (s *SSHSession) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 	}
 	log.Printf("HTTP forwarding approved on port: %d", portToBind)
 
-	domain := utils.Getenv("domain")
+	domain := utils.Getenv("DOMAIN", "localhost")
 	protocol := "http"
-	if utils.Getenv("tls_enabled") == "true" {
+	if utils.Getenv("TLS_ENABLED", "false") == "true" {
 		protocol = "https"
 	}
 
@@ -261,7 +258,7 @@ func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind 
 	s.Forwarder.SetForwardedPort(portToBind)
 	s.Interaction.SendMessage("\033[H\033[2J")
 	s.Interaction.ShowWelcomeMessage()
-	s.Interaction.SendMessage(fmt.Sprintf("Forwarding your traffic to tcp://%s:%d \r\n", utils.Getenv("domain"), s.Forwarder.GetForwardedPort()))
+	s.Interaction.SendMessage(fmt.Sprintf("Forwarding your traffic to tcp://%s:%d \r\n", utils.Getenv("DOMAIN", "localhost"), s.Forwarder.GetForwardedPort()))
 	s.Lifecycle.SetStatus(types.RUNNING)
 	go s.Forwarder.AcceptTCPConnections()
 	s.Interaction.HandleUserInput()

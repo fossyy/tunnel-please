@@ -208,7 +208,7 @@ func (i *Interaction) appendToSlug(char byte) {
 }
 
 func (i *Interaction) refreshSlugDisplay() {
-	domain := utils.Getenv("domain")
+	domain := utils.Getenv("DOMAIN", "localhost")
 	i.SendMessage(clearToLineEnd)
 	i.SendMessage("➤ " + i.EditSlug + "." + domain)
 }
@@ -238,7 +238,7 @@ func (i *Interaction) updateSlug() {
 		return
 	}
 
-	domain := utils.Getenv("domain")
+	domain := utils.Getenv("DOMAIN", "localhost")
 	i.SendMessage("\r\n\r\n✅ SUBDOMAIN UPDATED ✅\r\n\r\n")
 	i.SendMessage("Your new address is: " + newSlug + "." + domain + "\r\n\r\n")
 	i.SendMessage("Press any key to continue...\r\n")
@@ -340,16 +340,16 @@ func (i *Interaction) handleSlugCommand() {
 	i.SendMessage(clearScreen)
 	i.DisplaySlugEditor()
 
-	domain := utils.Getenv("domain")
+	domain := utils.Getenv("DOMAIN", "localhost")
 	i.SendMessage("➤ " + i.EditSlug + "." + domain)
 }
 
 func (i *Interaction) ShowForwardingMessage() {
-	domain := utils.Getenv("domain")
+	domain := utils.Getenv("DOMAIN", "localhost")
 
 	if i.Forwarder.GetTunnelType() == types.HTTP {
 		protocol := "http"
-		if utils.Getenv("tls_enabled") == "true" {
+		if utils.Getenv("TLS_ENABLED", "false") == "true" {
 			protocol = "https"
 		}
 		i.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, i.SlugManager.Get(), domain))
@@ -384,7 +384,7 @@ func (i *Interaction) ShowWelcomeMessage() {
 }
 
 func (i *Interaction) DisplaySlugEditor() {
-	domain := utils.Getenv("domain")
+	domain := utils.Getenv("DOMAIN", "localhost")
 	fullDomain := i.SlugManager.Get() + "." + domain
 
 	contentLine := "  ║  Current:  " + fullDomain

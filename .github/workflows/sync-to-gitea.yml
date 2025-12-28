@@ -1,0 +1,27 @@
+name: Sync to Gitea
+
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    if: |
+      github.repository == 'fossyy/tunnel-please' &&
+      !contains(github.event.head_commit.message, '[skip-gitea]')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to Gitea
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITEA_URL: git.fossy.my.id
+        run: |
+          git remote add gitea https://${{ secrets.GITEA_USERNAME }}:${GITEA_TOKEN}@${GITEA_URL}/bagas/tunnel-please.git
+          git push gitea ${{ github.ref }} --force

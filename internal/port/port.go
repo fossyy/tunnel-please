@@ -21,7 +21,7 @@ var Manager = PortManager{
 }
 
 func init() {
-	rawRange := utils.Getenv("ALLOWED_PORTS")
+	rawRange := utils.Getenv("ALLOWED_PORTS", "40000-41000")
 	splitRange := strings.Split(rawRange, "-")
 	if len(splitRange) != 2 {
 		Manager.AddPortRange(30000, 31000)

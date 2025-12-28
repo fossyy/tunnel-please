@@ -13,13 +13,14 @@ import (
 )
 
 func NewHTTPSServer() error {
-	cert, err := tls.LoadX509KeyPair(utils.Getenv("cert_loc"), utils.Getenv("key_loc"))
+	domain := utils.Getenv("DOMAIN", "localhost")
+
+	tlsConfig, err := NewTLSConfig(domain)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to initialize TLS config: %w", err)
 	}
 
-	config := &tls.Config{Certificates: []tls.Certificate{cert}}
-	ln, err := tls.Listen("tcp", ":443", config)
+	ln, err := tls.Listen("tcp", ":443", tlsConfig)
 	if err != nil {
 		return err
 	}

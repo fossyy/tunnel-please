@@ -2,11 +2,8 @@ package lifecycle
 
 import (
 	"errors"
-	"fmt"
 	"io"
-	"log"
 	"net"
-	"time"
 	portUtil "tunnel_pls/internal/port"
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
@@ -41,7 +38,6 @@ func (l *Lifecycle) SetUnregisterClient(unregisterClient func(slug string)) {
 
 type SessionLifecycle interface {
 	Close() error
-	WaitForRunningStatus()
 	SetStatus(status types.Status)
 	GetConnection() ssh.Conn
 	GetChannel() ssh.Channel
@@ -61,33 +57,6 @@ func (l *Lifecycle) GetConnection() ssh.Conn {
 }
 func (l *Lifecycle) SetStatus(status types.Status) {
 	l.Status = status
-}
-func (l *Lifecycle) WaitForRunningStatus() {
-	timeout := time.After(3 * time.Second)
-	ticker := time.NewTicker(150 * time.Millisecond)
-	defer ticker.Stop()
-	frames := []string{"-", "\\", "|", "/"}
-	i := 0
-	for {
-		select {
-		case <-ticker.C:
-			l.Interaction.SendMessage(fmt.Sprintf("\rLoading %s", frames[i]))
-			i = (i + 1) % len(frames)
-			if l.Status == types.RUNNING {
-				l.Interaction.SendMessage("\r\033[K")
-				return
-			}
-		case <-timeout:
-			l.Interaction.SendMessage("\r\033[K")
-			l.Interaction.SendMessage("TCP/IP request not received in time.\r\nCheck your internet connection and confirm the server responds within 3000ms.\r\nEnsure you ran the correct command. For more details, visit https://tunnl.live.\r\n\r\n")
-			err := l.Close()
-			if err != nil {
-				log.Printf("failed to close session: %v", err)
-			}
-			log.Println("Timeout waiting for session to start running")
-			return
-		}
-	}
 }
 
 func (l *Lifecycle) Close() error {
