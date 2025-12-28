@@ -22,6 +22,7 @@ The following environment variables can be configured in the `.env` file:
 |----------|-------------|---------|----------|
 | `DOMAIN` | Domain name for subdomain routing | `localhost` | No |
 | `PORT` | SSH server port | `2200` | No |
+| `HTTPS_PORT` | HTTPS server port | `8443` | No |
 | `TLS_ENABLED` | Enable TLS/HTTPS | `false` | No |
 | `TLS_REDIRECT` | Redirect HTTP to HTTPS | `false` | No |
 | `ACME_EMAIL` | Email for Let's Encrypt registration | `admin@<DOMAIN>` | No |

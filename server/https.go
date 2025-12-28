@@ -14,13 +14,14 @@ import (
 
 func NewHTTPSServer() error {
 	domain := utils.Getenv("DOMAIN", "localhost")
+	httpsPort := utils.Getenv("HTTPS_PORT", "8443")
 
 	tlsConfig, err := NewTLSConfig(domain)
 	if err != nil {
 		return fmt.Errorf("failed to initialize TLS config: %w", err)
 	}
 
-	ln, err := tls.Listen("tcp", ":443", tlsConfig)
+	ln, err := tls.Listen("tcp", ":"+httpsPort, tlsConfig)
 	if err != nil {
 		return err
 	}

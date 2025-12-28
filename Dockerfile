@@ -40,7 +40,7 @@ USER appuser
 
 ENV TZ=Asia/Jakarta
 
-EXPOSE 2200 80 443
+EXPOSE 2200 80 8443
 
 LABEL org.opencontainers.image.title="Tunnel Please" \
       org.opencontainers.image.description="SSH-based tunnel server"
