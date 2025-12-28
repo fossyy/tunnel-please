@@ -193,7 +193,8 @@ func (cw *CustomWriter) AddInteraction(interaction Interaction) {
 var redirectTLS = false
 
 func NewHTTPServer() error {
-	listener, err := net.Listen("tcp", ":80")
+	httpPort := utils.Getenv("HTTP_PORT", "8080")
+	listener, err := net.Listen("tcp", ":"+httpPort)
 	if err != nil {
 		return errors.New("Error listening: " + err.Error())
 	}
