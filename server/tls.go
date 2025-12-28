@@ -37,9 +37,9 @@ func NewTLSConfig(domain string) (*tls.Config, error) {
 	var initErr error
 
 	tlsManagerOnce.Do(func() {
-		certPath := utils.Getenv("CERT_LOC", "certs/cert.pem")
-		keyPath := utils.Getenv("KEY_LOC", "certs/privkey.pem")
-		storagePath := utils.Getenv("CERT_STORAGE_PATH", "certs/certmagic")
+		certPath := "certs/tls/cert.pem"
+		keyPath := "certs/tls/privkey.pem"
+		storagePath := "certs/tls/certmagic"
 
 		tm := &TLSManager{
 			domain:      domain,

@@ -107,7 +107,7 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 		return
 	} else {
 		if portToBind == 0 {
-			unassign, success := portUtil.Manager.GetUnassignedPort()
+			unassign, success := portUtil.Default.GetUnassignedPort()
 			portToBind = unassign
 			if !success {
 				s.Interaction.SendMessage("No available port\r\n")
@@ -122,7 +122,7 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 				}
 				return
 			}
-		} else if isUse, isExist := portUtil.Manager.GetPortStatus(portToBind); isExist && isUse {
+		} else if isUse, isExist := portUtil.Default.GetPortStatus(portToBind); isExist && isUse {
 			s.Interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (03)\r\n", portToBind))
 			err := req.Reply(false, nil)
 			if err != nil {
@@ -135,7 +135,7 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 			}
 			return
 		}
-		err := portUtil.Manager.SetPortStatus(portToBind, true)
+		err := portUtil.Default.SetPortStatus(portToBind, true)
 		if err != nil {
 			log.Println("Failed to set port status:", err)
 			return
@@ -208,7 +208,7 @@ func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind 
 	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", portToBind))
 	if err != nil {
 		s.Interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port.\r\n", portToBind))
-		if setErr := portUtil.Manager.SetPortStatus(portToBind, false); setErr != nil {
+		if setErr := portUtil.Default.SetPortStatus(portToBind, false); setErr != nil {
 			log.Printf("Failed to reset port status: %v", setErr)
 		}
 		err = req.Reply(false, nil)
@@ -227,7 +227,7 @@ func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind 
 	err = binary.Write(buf, binary.BigEndian, uint32(portToBind))
 	if err != nil {
 		log.Println("Failed to write port to buffer:", err)
-		if setErr := portUtil.Manager.SetPortStatus(portToBind, false); setErr != nil {
+		if setErr := portUtil.Default.SetPortStatus(portToBind, false); setErr != nil {
 			log.Printf("Failed to reset port status: %v", setErr)
 		}
 		err = listener.Close()
@@ -242,7 +242,7 @@ func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind 
 	err = req.Reply(true, buf.Bytes())
 	if err != nil {
 		log.Println("Failed to reply to request:", err)
-		if setErr := portUtil.Manager.SetPortStatus(portToBind, false); setErr != nil {
+		if setErr := portUtil.Default.SetPortStatus(portToBind, false); setErr != nil {
 			log.Printf("Failed to reset port status: %v", setErr)
 		}
 		err = listener.Close()

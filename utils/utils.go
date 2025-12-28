@@ -11,22 +11,18 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/joho/godotenv"
 	"golang.org/x/crypto/ssh"
 )
 
-type Env struct {
-	value map[string]string
-	mu    sync.Mutex
-}
-
-var env *Env
-
 func init() {
-	env = &Env{value: map[string]string{}}
+	if _, err := os.Stat(".env"); err == nil {
+		if err := godotenv.Load(".env"); err != nil {
+			log.Printf("Warning: Failed to load .env file: %s", err)
+		}
+	}
 }
 
 func GenerateRandomString(length int) string {
@@ -41,24 +37,10 @@ func GenerateRandomString(length int) string {
 }
 
 func Getenv(key, defaultValue string) string {
-	env.mu.Lock()
-	defer env.mu.Unlock()
-	if val, ok := env.value[key]; ok {
-		return val
-	}
-
-	if os.Getenv("HOSTNAME") == "" {
-		err := godotenv.Load(".env")
-		if err != nil {
-			log.Fatalf("Error loading .env file: %s", err)
-		}
-	}
-
 	val := os.Getenv(key)
 	if val == "" {
 		val = defaultValue
 	}
-	env.value[key] = val
 
 	return val
 }
