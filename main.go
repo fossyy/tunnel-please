@@ -33,7 +33,7 @@ func main() {
 		ServerVersion: "SSH-2.0-TunnlPls-1.0",
 	}
 
-	sshKeyPath := utils.Getenv("SSH_PRIVATE_KEY", "certs/id_rsa")
+	sshKeyPath := "certs/ssh/id_rsa"
 	if err := utils.GenerateSSHKeyIfNotExist(sshKeyPath); err != nil {
 		log.Fatalf("Failed to generate SSH key: %s", err)
 	}

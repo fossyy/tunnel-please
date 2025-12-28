@@ -22,7 +22,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -o /app/tunnel_pls \
     .
 
-RUN adduser -D -u 10001 -g '' appuser
+RUN adduser -D -u 10001 -g '' appuser && \
+    mkdir -p /app/certs/ssh /app/certs/tls && \
+    chown -R appuser:appuser /app
 
 FROM scratch
 
@@ -30,7 +32,7 @@ COPY --from=go_builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=go_builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=go_builder /etc/passwd /etc/passwd
 COPY --from=go_builder /etc/group /etc/group
-COPY --from=go_builder /app/tunnel_pls /app/tunnel_pls
+COPY --from=go_builder --chown=appuser:appuser /app /app
 
 WORKDIR /app
 

@@ -24,13 +24,9 @@ The following environment variables can be configured in the `.env` file:
 | `PORT` | SSH server port | `2200` | No |
 | `TLS_ENABLED` | Enable TLS/HTTPS | `false` | No |
 | `TLS_REDIRECT` | Redirect HTTP to HTTPS | `false` | No |
-| `CERT_LOC` | Path to TLS certificate | `certs/cert.pem` | No |
-| `KEY_LOC` | Path to TLS private key | `certs/privkey.pem` | No |
-| `CERT_STORAGE_PATH` | Path for CertMagic certificate storage | `certs/certmagic` | No |
 | `ACME_EMAIL` | Email for Let's Encrypt registration | `admin@<DOMAIN>` | No |
 | `CF_API_TOKEN` | Cloudflare API token for DNS-01 challenge | - | Yes (if auto-cert) |
 | `ACME_STAGING` | Use Let's Encrypt staging server | `false` | No |
-| `SSH_PRIVATE_KEY` | Path to SSH private key (auto-generated if missing) | `certs/id_rsa` | No |
 | `CORS_LIST` | Comma-separated list of allowed CORS origins | - | No |
 | `ALLOWED_PORTS` | Port range for TCP tunnels (e.g., 40000-41000) | `40000-41000` | No |
 | `BUFFER_SIZE` | Buffer size for io.Copy operations in bytes (4096-1048576) | `32768` | No |
@@ -43,8 +39,14 @@ The following environment variables can be configured in the `.env` file:
 
 The server supports automatic TLS certificate generation and renewal using [CertMagic](https://github.com/caddyserver/certmagic) with Cloudflare DNS-01 challenge. This is required for wildcard certificate support (`*.yourdomain.com`).
 
+**Certificate Storage:**
+- TLS certificates are stored in `certs/tls/` (relative to application directory)
+- User-provided certificates: `certs/tls/cert.pem` and `certs/tls/privkey.pem`
+- CertMagic automatic certificates: `certs/tls/certmagic/`
+- SSH keys are stored separately in `certs/ssh/`
+
 **How it works:**
-1. If user-provided certificates (`CERT_LOC`, `KEY_LOC`) exist and cover both `DOMAIN` and `*.DOMAIN`, they will be used
+1. If user-provided certificates exist at `certs/tls/cert.pem` and `certs/tls/privkey.pem` and cover both `DOMAIN` and `*.DOMAIN`, they will be used
 2. If certificates are missing, expired, expiring within 30 days, or don't cover the required domains, CertMagic will automatically obtain new certificates from Let's Encrypt
 3. Certificates are automatically renewed before expiration
 4. User-provided certificates support hot-reload (changes detected every 30 seconds)
@@ -71,7 +73,7 @@ ACME_EMAIL=admin@example.com
 
 ### SSH Key Auto-Generation
 
-If the SSH private key specified in `SSH_PRIVATE_KEY` doesn't exist, the application will automatically generate a new 4096-bit RSA key pair at the specified location. This makes it easier to get started without manually creating SSH keys.
+The application will automatically generate a new 4096-bit RSA key pair at `certs/ssh/id_rsa` if it doesn't exist. This makes it easier to get started without manually creating SSH keys. SSH keys are stored separately from TLS certificates.
 
 ### Memory Optimization
 
