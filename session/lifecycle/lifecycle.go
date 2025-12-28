@@ -85,7 +85,7 @@ func (l *Lifecycle) Close() error {
 	}
 
 	if l.Forwarder.GetTunnelType() == types.TCP {
-		err := portUtil.Manager.SetPortStatus(l.Forwarder.GetForwardedPort(), false)
+		err := portUtil.Default.SetPortStatus(l.Forwarder.GetForwardedPort(), false)
 		if err != nil {
 			return err
 		}

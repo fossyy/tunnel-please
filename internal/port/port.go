@@ -9,36 +9,47 @@ import (
 	"tunnel_pls/utils"
 )
 
-type PortManager struct {
+type Manager interface {
+	AddPortRange(startPort, endPort uint16) error
+	GetUnassignedPort() (uint16, bool)
+	SetPortStatus(port uint16, assigned bool) error
+	GetPortStatus(port uint16) (bool, bool)
+}
+
+type manager struct {
 	mu          sync.RWMutex
 	ports       map[uint16]bool
 	sortedPorts []uint16
 }
 
-var Manager = PortManager{
+var Default Manager = &manager{
 	ports:       make(map[uint16]bool),
 	sortedPorts: []uint16{},
 }
 
 func init() {
-	rawRange := utils.Getenv("ALLOWED_PORTS", "40000-41000")
+	rawRange := utils.Getenv("ALLOWED_PORTS", "")
+	if rawRange == "" {
+		return
+	}
+
 	splitRange := strings.Split(rawRange, "-")
 	if len(splitRange) != 2 {
-		Manager.AddPortRange(30000, 31000)
-	} else {
-		start, err := strconv.ParseUint(splitRange[0], 10, 16)
-		if err != nil {
-			start = 30000
-		}
-		end, err := strconv.ParseUint(splitRange[1], 10, 16)
-		if err != nil {
-			end = 31000
-		}
-		Manager.AddPortRange(uint16(start), uint16(end))
+		return
 	}
+
+	start, err := strconv.ParseUint(splitRange[0], 10, 16)
+	if err != nil {
+		return
+	}
+	end, err := strconv.ParseUint(splitRange[1], 10, 16)
+	if err != nil {
+		return
+	}
+	_ = Default.AddPortRange(uint16(start), uint16(end))
 }
 
-func (pm *PortManager) AddPortRange(startPort, endPort uint16) error {
+func (pm *manager) AddPortRange(startPort, endPort uint16) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -57,7 +68,7 @@ func (pm *PortManager) AddPortRange(startPort, endPort uint16) error {
 	return nil
 }
 
-func (pm *PortManager) GetUnassignedPort() (uint16, bool) {
+func (pm *manager) GetUnassignedPort() (uint16, bool) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -70,7 +81,7 @@ func (pm *PortManager) GetUnassignedPort() (uint16, bool) {
 	return 0, false
 }
 
-func (pm *PortManager) SetPortStatus(port uint16, assigned bool) error {
+func (pm *manager) SetPortStatus(port uint16, assigned bool) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -78,7 +89,7 @@ func (pm *PortManager) SetPortStatus(port uint16, assigned bool) error {
 	return nil
 }
 
-func (pm *PortManager) GetPortStatus(port uint16) (bool, bool) {
+func (pm *manager) GetPortStatus(port uint16) (bool, bool) {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 
