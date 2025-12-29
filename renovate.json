@@ -10,7 +10,10 @@
         "pin",
         "digest"
       ],
-      "automerge": true
+      "automerge": true,
+      "baseBranches": [
+        "staging"
+      ]
     }
   ]
 }

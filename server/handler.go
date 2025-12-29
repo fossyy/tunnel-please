@@ -9,7 +9,7 @@ import (
 )
 
 func (s *Server) handleConnection(conn net.Conn) {
-	sshConn, chans, forwardingReqs, err := ssh.NewServerConn(conn, s.Config)
+	sshConn, chans, forwardingReqs, err := ssh.NewServerConn(conn, s.config)
 	if err != nil {
 		log.Printf("failed to establish SSH connection: %v", err)
 		err := conn.Close()

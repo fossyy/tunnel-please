@@ -6,7 +6,6 @@ A lightweight SSH-based tunnel server written in Go that enables secure TCP and 
 
 - SSH interactive session with real-time command handling
 - Custom subdomain management for HTTP tunnels
-- Active connection control with drop functionality
 - Dual protocol support: HTTP and TCP tunnels
 - Real-time connection monitoring
 ## Requirements
@@ -115,6 +114,110 @@ go tool pprof http://localhost:6060/debug/pprof/profile?seconds=30
 # Analyze memory heap
 go tool pprof http://localhost:6060/debug/pprof/heap
 ```
+
+## Docker Deployment
+
+Three Docker Compose configurations are available for different deployment scenarios. Each configuration uses the image `git.fossy.my.id/bagas/tunnel-please:latest`.
+
+### Configuration Options
+
+#### 1. Root with Host Networking (RECOMMENDED)
+
+**File:** `docker-compose.root.yml`
+
+**Advantages:**
+- Full TCP port forwarding support (ports 40000-41000)
+- Direct binding to privileged ports (80, 443, 2200)
+- Best performance with no NAT overhead
+- Maximum flexibility for all tunnel types
+- No port mapping limitations
+
+**Use Case:** Production deployments where you need unrestricted TCP forwarding and maximum performance.
+
+**Deploy:**
+```bash
+docker-compose -f docker-compose.root.yml up -d
+```
+
+#### 2. Standard (HTTP/HTTPS Only)
+
+**File:** `docker-compose.standard.yml`
+
+**Advantages:**
+- Runs with unprivileged user (more secure)
+- Standard port mappings (2200, 80, 443)
+- Simple and predictable networking
+- TCP port forwarding disabled (`ALLOWED_PORTS=none`)
+
+**Use Case:** Deployments where you only need HTTP/HTTPS tunneling without custom TCP port forwarding.
+
+**Deploy:**
+```bash
+docker-compose -f docker-compose.standard.yml up -d
+```
+
+#### 3. Limited TCP Forwarding
+
+**File:** `docker-compose.tcp.yml`
+
+**Advantages:**
+- Runs with unprivileged user (more secure)
+- Standard port mappings (2200, 80, 443)
+- Limited TCP forwarding (ports 30000-31000)
+- Controlled port range exposure
+
+**Use Case:** Deployments where you need both HTTP/HTTPS tunneling and limited TCP forwarding within a specific port range.
+
+**Deploy:**
+```bash
+docker-compose -f docker-compose.tcp.yml up -d
+```
+
+### Quick Start
+
+1. **Choose your configuration** based on your requirements
+2. **Edit the environment variables** in the chosen compose file:
+   - `DOMAIN`: Your domain name (e.g., `example.com`)
+   - `ACME_EMAIL`: Your email for Let's Encrypt
+   - `CF_API_TOKEN`: Your Cloudflare API token (if using automatic TLS)
+3. **Deploy:**
+   ```bash
+   docker-compose -f docker-compose.root.yml up -d
+   ```
+4. **Check logs:**
+   ```bash
+   docker-compose -f docker-compose.root.yml logs -f
+   ```
+5. **Stop the service:**
+   ```bash
+   docker-compose -f docker-compose.root.yml down
+   ```
+
+### Volume Management
+
+All configurations use a named volume `certs` for persistent storage:
+- SSH keys: `/app/certs/ssh/`
+- TLS certificates: `/app/certs/tls/`
+
+To backup certificates:
+```bash
+docker run --rm -v tunnel_pls_certs:/data -v $(pwd):/backup alpine tar czf /backup/certs-backup.tar.gz -C /data .
+```
+
+To restore certificates:
+```bash
+docker run --rm -v tunnel_pls_certs:/data -v $(pwd):/backup alpine tar xzf /backup/certs-backup.tar.gz -C /data
+```
+
+### Recommendation
+
+**Use `docker-compose.root.yml`** for production deployments if you need:
+- Full TCP port forwarding capabilities
+- Any port range configuration
+- Direct port binding without mapping overhead
+- Maximum performance and flexibility
+
+This is the recommended configuration for most use cases as it provides the complete feature set without limitations.
 
 ## Contributing
 Contributions are welcome!

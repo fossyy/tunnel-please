@@ -22,14 +22,25 @@ type Forwarder interface {
 }
 
 type Lifecycle struct {
-	Status  types.Status
-	Conn    ssh.Conn
-	Channel ssh.Channel
-
-	Interaction      Interaction
-	Forwarder        Forwarder
-	SlugManager      slug.Manager
+	status           types.Status
+	conn             ssh.Conn
+	channel          ssh.Channel
+	interaction      Interaction
+	forwarder        Forwarder
+	slugManager      slug.Manager
 	unregisterClient func(slug string)
+}
+
+func NewLifecycle(conn ssh.Conn, interaction Interaction, forwarder Forwarder, slugManager slug.Manager) *Lifecycle {
+	return &Lifecycle{
+		status:           "",
+		conn:             conn,
+		channel:          nil,
+		interaction:      interaction,
+		forwarder:        forwarder,
+		slugManager:      slugManager,
+		unregisterClient: nil,
+	}
 }
 
 func (l *Lifecycle) SetUnregisterClient(unregisterClient func(slug string)) {
@@ -46,46 +57,46 @@ type SessionLifecycle interface {
 }
 
 func (l *Lifecycle) GetChannel() ssh.Channel {
-	return l.Channel
+	return l.channel
 }
 
 func (l *Lifecycle) SetChannel(channel ssh.Channel) {
-	l.Channel = channel
+	l.channel = channel
 }
 func (l *Lifecycle) GetConnection() ssh.Conn {
-	return l.Conn
+	return l.conn
 }
 func (l *Lifecycle) SetStatus(status types.Status) {
-	l.Status = status
+	l.status = status
 }
 
 func (l *Lifecycle) Close() error {
-	err := l.Forwarder.Close()
+	err := l.forwarder.Close()
 	if err != nil && !errors.Is(err, net.ErrClosed) {
 		return err
 	}
 
-	if l.Channel != nil {
-		err := l.Channel.Close()
+	if l.channel != nil {
+		err := l.channel.Close()
 		if err != nil && !errors.Is(err, io.EOF) {
 			return err
 		}
 	}
 
-	if l.Conn != nil {
-		err := l.Conn.Close()
+	if l.conn != nil {
+		err := l.conn.Close()
 		if err != nil && !errors.Is(err, net.ErrClosed) {
 			return err
 		}
 	}
 
-	clientSlug := l.SlugManager.Get()
+	clientSlug := l.slugManager.Get()
 	if clientSlug != "" {
 		l.unregisterClient(clientSlug)
 	}
 
-	if l.Forwarder.GetTunnelType() == types.TCP {
-		err := portUtil.Default.SetPortStatus(l.Forwarder.GetForwardedPort(), false)
+	if l.forwarder.GetTunnelType() == types.TCP {
+		err := portUtil.Default.SetPortStatus(l.forwarder.GetForwardedPort(), false)
 		if err != nil {
 			return err
 		}

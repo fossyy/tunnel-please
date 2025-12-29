@@ -31,11 +31,21 @@ func copyWithBuffer(dst io.Writer, src io.Reader) (written int64, err error) {
 }
 
 type Forwarder struct {
-	Listener      net.Listener
-	TunnelType    types.TunnelType
-	ForwardedPort uint16
-	SlugManager   slug.Manager
-	Lifecycle     Lifecycle
+	listener      net.Listener
+	tunnelType    types.TunnelType
+	forwardedPort uint16
+	slugManager   slug.Manager
+	lifecycle     Lifecycle
+}
+
+func NewForwarder(slugManager slug.Manager) *Forwarder {
+	return &Forwarder{
+		listener:      nil,
+		tunnelType:    "",
+		forwardedPort: 0,
+		slugManager:   slugManager,
+		lifecycle:     nil,
+	}
 }
 
 type Lifecycle interface {
@@ -58,7 +68,7 @@ type ForwardingController interface {
 }
 
 func (f *Forwarder) SetLifecycle(lifecycle Lifecycle) {
-	f.Lifecycle = lifecycle
+	f.lifecycle = lifecycle
 }
 
 func (f *Forwarder) AcceptTCPConnections() {
@@ -90,7 +100,7 @@ func (f *Forwarder) AcceptTCPConnections() {
 		resultChan := make(chan channelResult, 1)
 
 		go func() {
-			channel, reqs, err := f.Lifecycle.GetConnection().OpenChannel("forwarded-tcpip", payload)
+			channel, reqs, err := f.lifecycle.GetConnection().OpenChannel("forwarded-tcpip", payload)
 			resultChan <- channelResult{channel, reqs, err}
 		}()
 
@@ -164,27 +174,27 @@ func (f *Forwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel, remoteA
 }
 
 func (f *Forwarder) SetType(tunnelType types.TunnelType) {
-	f.TunnelType = tunnelType
+	f.tunnelType = tunnelType
 }
 
 func (f *Forwarder) GetTunnelType() types.TunnelType {
-	return f.TunnelType
+	return f.tunnelType
 }
 
 func (f *Forwarder) GetForwardedPort() uint16 {
-	return f.ForwardedPort
+	return f.forwardedPort
 }
 
 func (f *Forwarder) SetForwardedPort(port uint16) {
-	f.ForwardedPort = port
+	f.forwardedPort = port
 }
 
 func (f *Forwarder) SetListener(listener net.Listener) {
-	f.Listener = listener
+	f.listener = listener
 }
 
 func (f *Forwarder) GetListener() net.Listener {
-	return f.Listener
+	return f.listener
 }
 
 func (f *Forwarder) WriteBadGatewayResponse(dst io.Writer) {
@@ -197,7 +207,7 @@ func (f *Forwarder) WriteBadGatewayResponse(dst io.Writer) {
 
 func (f *Forwarder) Close() error {
 	if f.GetListener() != nil {
-		return f.Listener.Close()
+		return f.listener.Close()
 	}
 	return nil
 }

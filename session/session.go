@@ -1,7 +1,6 @@
 package session
 
 import (
-	"bytes"
 	"fmt"
 	"log"
 	"sync"
@@ -28,36 +27,33 @@ type Session interface {
 }
 
 type SSHSession struct {
-	Lifecycle   lifecycle.SessionLifecycle
-	Interaction interaction.Controller
-	Forwarder   forwarder.ForwardingController
-	SlugManager slug.Manager
+	lifecycle   lifecycle.SessionLifecycle
+	interaction interaction.Controller
+	forwarder   forwarder.ForwardingController
+	slugManager slug.Manager
+}
+
+func (s *SSHSession) GetLifecycle() lifecycle.SessionLifecycle {
+	return s.lifecycle
+}
+
+func (s *SSHSession) GetInteraction() interaction.Controller {
+	return s.interaction
+}
+
+func (s *SSHSession) GetForwarder() forwarder.ForwardingController {
+	return s.forwarder
+}
+
+func (s *SSHSession) GetSlugManager() slug.Manager {
+	return s.slugManager
 }
 
 func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel) {
 	slugManager := slug.NewManager()
-	forwarderManager := &forwarder.Forwarder{
-		Listener:      nil,
-		TunnelType:    "",
-		ForwardedPort: 0,
-		SlugManager:   slugManager,
-	}
-	interactionManager := &interaction.Interaction{
-		CommandBuffer:   bytes.NewBuffer(make([]byte, 0, 20)),
-		InteractiveMode: false,
-		EditSlug:        "",
-		SlugManager:     slugManager,
-		Forwarder:       forwarderManager,
-		Lifecycle:       nil,
-	}
-	lifecycleManager := &lifecycle.Lifecycle{
-		Status:      "",
-		Conn:        conn,
-		Channel:     nil,
-		Interaction: interactionManager,
-		Forwarder:   forwarderManager,
-		SlugManager: slugManager,
-	}
+	forwarderManager := forwarder.NewForwarder(slugManager)
+	interactionManager := interaction.NewInteraction(slugManager, forwarderManager)
+	lifecycleManager := lifecycle.NewLifecycle(conn, interactionManager, forwarderManager, slugManager)
 
 	interactionManager.SetLifecycle(lifecycleManager)
 	interactionManager.SetSlugModificator(updateClientSlug)
@@ -65,10 +61,10 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 	lifecycleManager.SetUnregisterClient(unregisterClient)
 
 	session := &SSHSession{
-		Lifecycle:   lifecycleManager,
-		Interaction: interactionManager,
-		Forwarder:   forwarderManager,
-		SlugManager: slugManager,
+		lifecycle:   lifecycleManager,
+		interaction: interactionManager,
+		forwarder:   forwarderManager,
+		slugManager: slugManager,
 	}
 
 	var once sync.Once
@@ -79,13 +75,13 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 			continue
 		}
 		once.Do(func() {
-			session.Lifecycle.SetChannel(ch)
-			session.Interaction.SetChannel(ch)
+			session.lifecycle.SetChannel(ch)
+			session.interaction.SetChannel(ch)
 
 			tcpipReq := session.waitForTCPIPForward(forwardingReq)
 			if tcpipReq == nil {
-				session.Interaction.SendMessage(fmt.Sprintf("Port forwarding request not received.\r\nEnsure you ran the correct command with -R flag.\r\nExample: ssh %s -p %s -R 80:localhost:3000\r\nFor more details, visit https://tunnl.live.\r\n\r\n", utils.Getenv("DOMAIN", "localhost"), utils.Getenv("PORT", "2200")))
-				if err := session.Lifecycle.Close(); err != nil {
+				session.interaction.SendMessage(fmt.Sprintf("Port forwarding request not received.\r\nEnsure you ran the correct command with -R flag.\r\nExample: ssh %s -p %s -R 80:localhost:3000\r\nFor more details, visit https://tunnl.live.\r\n\r\n", utils.Getenv("DOMAIN", "localhost"), utils.Getenv("PORT", "2200")))
+				if err := session.lifecycle.Close(); err != nil {
 					log.Printf("failed to close session: %v", err)
 				}
 				return
@@ -94,7 +90,7 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 		})
 		go session.HandleGlobalRequest(reqs)
 	}
-	if err := session.Lifecycle.Close(); err != nil {
+	if err := session.lifecycle.Close(); err != nil {
 		log.Printf("failed to close session: %v", err)
 	}
 }
@@ -134,7 +130,7 @@ func updateClientSlug(oldSlug, newSlug string) bool {
 	}
 
 	delete(Clients, oldSlug)
-	client.SlugManager.Set(newSlug)
+	client.slugManager.Set(newSlug)
 	Clients[newSlug] = client
 	return true
 }

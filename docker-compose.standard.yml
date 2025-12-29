@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  tunnel-please:
+    image: git.fossy.my.id/bagas/tunnel-please:latest
+    container_name: tunnel-please-standard
+    restart: unless-stopped
+    ports:
+      - "2200:2200"
+      - "80:8080"
+      - "443:8443"
+    volumes:
+      - certs:/app/certs
+    environment:
+      DOMAIN: example.com
+      PORT: 2200
+      HTTP_PORT: 8080
+      HTTPS_PORT: 8443
+      TLS_ENABLED: "true"
+      TLS_REDIRECT: "true"
+      ACME_EMAIL: admin@example.com
+      CF_API_TOKEN: your_cloudflare_api_token_here
+      ACME_STAGING: "false"
+      CORS_LIST: http://localhost:3000,https://example.com
+      ALLOWED_PORTS: none
+      BUFFER_SIZE: 32768
+      PPROF_ENABLED: "false"
+      PPROF_PORT: 6060
+    healthcheck:
+      test: ["CMD", "/bin/sh", "-c", "netstat -tln | grep -q :2200"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  certs:
+    driver: local
+

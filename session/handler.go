@@ -49,7 +49,7 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 			log.Println("Failed to reply to request:", err)
 			return
 		}
-		err = s.Lifecycle.Close()
+		err = s.lifecycle.Close()
 		if err != nil {
 			log.Printf("failed to close session: %v", err)
 		}
@@ -59,13 +59,13 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 	var rawPortToBind uint32
 	if err := binary.Read(reader, binary.BigEndian, &rawPortToBind); err != nil {
 		log.Println("Failed to read port from payload:", err)
-		s.Interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (02) \r\n", rawPortToBind))
+		s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (02) \r\n", rawPortToBind))
 		err := req.Reply(false, nil)
 		if err != nil {
 			log.Println("Failed to reply to request:", err)
 			return
 		}
-		err = s.Lifecycle.Close()
+		err = s.lifecycle.Close()
 		if err != nil {
 			log.Printf("failed to close session: %v", err)
 		}
@@ -73,13 +73,13 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 	}
 
 	if rawPortToBind > 65535 {
-		s.Interaction.SendMessage(fmt.Sprintf("Port %d is larger then allowed port of 65535. (02)\r\n", rawPortToBind))
+		s.interaction.SendMessage(fmt.Sprintf("Port %d is larger then allowed port of 65535. (02)\r\n", rawPortToBind))
 		err := req.Reply(false, nil)
 		if err != nil {
 			log.Println("Failed to reply to request:", err)
 			return
 		}
-		err = s.Lifecycle.Close()
+		err = s.lifecycle.Close()
 		if err != nil {
 			log.Printf("failed to close session: %v", err)
 		}
@@ -89,13 +89,13 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 	portToBind := uint16(rawPortToBind)
 
 	if isBlockedPort(portToBind) {
-		s.Interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (02)\r\n", portToBind))
+		s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (02)\r\n", portToBind))
 		err := req.Reply(false, nil)
 		if err != nil {
 			log.Println("Failed to reply to request:", err)
 			return
 		}
-		err = s.Lifecycle.Close()
+		err = s.lifecycle.Close()
 		if err != nil {
 			log.Printf("failed to close session: %v", err)
 		}
@@ -110,26 +110,26 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 			unassign, success := portUtil.Default.GetUnassignedPort()
 			portToBind = unassign
 			if !success {
-				s.Interaction.SendMessage("No available port\r\n")
+				s.interaction.SendMessage("No available port\r\n")
 				err := req.Reply(false, nil)
 				if err != nil {
 					log.Println("Failed to reply to request:", err)
 					return
 				}
-				err = s.Lifecycle.Close()
+				err = s.lifecycle.Close()
 				if err != nil {
 					log.Printf("failed to close session: %v", err)
 				}
 				return
 			}
 		} else if isUse, isExist := portUtil.Default.GetPortStatus(portToBind); isExist && isUse {
-			s.Interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (03)\r\n", portToBind))
+			s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (03)\r\n", portToBind))
 			err := req.Reply(false, nil)
 			if err != nil {
 				log.Println("Failed to reply to request:", err)
 				return
 			}
-			err = s.Lifecycle.Close()
+			err = s.lifecycle.Close()
 			if err != nil {
 				log.Printf("failed to close session: %v", err)
 			}
@@ -193,21 +193,21 @@ func (s *SSHSession) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 		return
 	}
 
-	s.Forwarder.SetType(types.HTTP)
-	s.Forwarder.SetForwardedPort(portToBind)
-	s.SlugManager.Set(slug)
-	s.Interaction.SendMessage("\033[H\033[2J")
-	s.Interaction.ShowWelcomeMessage()
-	s.Interaction.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s\r\n", protocol, slug, domain))
-	s.Lifecycle.SetStatus(types.RUNNING)
-	s.Interaction.HandleUserInput()
+	s.forwarder.SetType(types.HTTP)
+	s.forwarder.SetForwardedPort(portToBind)
+	s.slugManager.Set(slug)
+	s.interaction.SendMessage("\033[H\033[2J")
+	s.interaction.ShowWelcomeMessage()
+	s.interaction.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s\r\n", protocol, slug, domain))
+	s.lifecycle.SetStatus(types.RUNNING)
+	s.interaction.HandleUserInput()
 }
 
 func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind uint16) {
 	log.Printf("Requested forwarding on %s:%d", addr, portToBind)
 	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", portToBind))
 	if err != nil {
-		s.Interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port.\r\n", portToBind))
+		s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port.\r\n", portToBind))
 		if setErr := portUtil.Default.SetPortStatus(portToBind, false); setErr != nil {
 			log.Printf("Failed to reset port status: %v", setErr)
 		}
@@ -216,7 +216,7 @@ func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind 
 			log.Println("Failed to reply to request:", err)
 			return
 		}
-		err = s.Lifecycle.Close()
+		err = s.lifecycle.Close()
 		if err != nil {
 			log.Printf("failed to close session: %v", err)
 		}
@@ -253,15 +253,15 @@ func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind 
 		return
 	}
 
-	s.Forwarder.SetType(types.TCP)
-	s.Forwarder.SetListener(listener)
-	s.Forwarder.SetForwardedPort(portToBind)
-	s.Interaction.SendMessage("\033[H\033[2J")
-	s.Interaction.ShowWelcomeMessage()
-	s.Interaction.SendMessage(fmt.Sprintf("Forwarding your traffic to tcp://%s:%d \r\n", utils.Getenv("DOMAIN", "localhost"), s.Forwarder.GetForwardedPort()))
-	s.Lifecycle.SetStatus(types.RUNNING)
-	go s.Forwarder.AcceptTCPConnections()
-	s.Interaction.HandleUserInput()
+	s.forwarder.SetType(types.TCP)
+	s.forwarder.SetListener(listener)
+	s.forwarder.SetForwardedPort(portToBind)
+	s.interaction.SendMessage("\033[H\033[2J")
+	s.interaction.ShowWelcomeMessage()
+	s.interaction.SendMessage(fmt.Sprintf("Forwarding your traffic to tcp://%s:%d \r\n", utils.Getenv("DOMAIN", "localhost"), s.forwarder.GetForwardedPort()))
+	s.lifecycle.SetStatus(types.RUNNING)
+	go s.forwarder.AcceptTCPConnections()
+	s.interaction.HandleUserInput()
 }
 
 func generateUniqueSlug() string {

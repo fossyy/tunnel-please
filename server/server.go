@@ -11,9 +11,21 @@ import (
 )
 
 type Server struct {
-	Conn       *net.Listener
-	Config     *ssh.ServerConfig
-	HttpServer *http.Server
+	conn       *net.Listener
+	config     *ssh.ServerConfig
+	httpServer *http.Server
+}
+
+func (s *Server) GetConn() *net.Listener {
+	return s.conn
+}
+
+func (s *Server) GetConfig() *ssh.ServerConfig {
+	return s.config
+}
+
+func (s *Server) GetHttpServer() *http.Server {
+	return s.httpServer
 }
 
 func NewServer(config *ssh.ServerConfig) *Server {
@@ -33,15 +45,15 @@ func NewServer(config *ssh.ServerConfig) *Server {
 		log.Fatalf("failed to start http server: %v", err)
 	}
 	return &Server{
-		Conn:   &listener,
-		Config: config,
+		conn:   &listener,
+		config: config,
 	}
 }
 
 func (s *Server) Start() {
 	log.Println("SSH server is starting on port 2200...")
 	for {
-		conn, err := (*s.Conn).Accept()
+		conn, err := (*s.conn).Accept()
 		if err != nil {
 			log.Printf("failed to accept connection: %v", err)
 			continue
