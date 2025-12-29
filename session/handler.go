@@ -59,7 +59,6 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 	var rawPortToBind uint32
 	if err := binary.Read(reader, binary.BigEndian, &rawPortToBind); err != nil {
 		log.Println("Failed to read port from payload:", err)
-		s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (02) \r\n", rawPortToBind))
 		err := req.Reply(false, nil)
 		if err != nil {
 			log.Println("Failed to reply to request:", err)
@@ -73,7 +72,7 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 	}
 
 	if rawPortToBind > 65535 {
-		s.interaction.SendMessage(fmt.Sprintf("Port %d is larger then allowed port of 65535. (02)\r\n", rawPortToBind))
+		log.Printf("Port %d is larger than allowed port of 65535", rawPortToBind)
 		err := req.Reply(false, nil)
 		if err != nil {
 			log.Println("Failed to reply to request:", err)
@@ -89,7 +88,7 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 	portToBind := uint16(rawPortToBind)
 
 	if isBlockedPort(portToBind) {
-		s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (02)\r\n", portToBind))
+		log.Printf("Port %d is blocked or restricted", portToBind)
 		err := req.Reply(false, nil)
 		if err != nil {
 			log.Println("Failed to reply to request:", err)
@@ -110,7 +109,7 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 			unassign, success := portUtil.Default.GetUnassignedPort()
 			portToBind = unassign
 			if !success {
-				s.interaction.SendMessage("No available port\r\n")
+				log.Println("No available port")
 				err := req.Reply(false, nil)
 				if err != nil {
 					log.Println("Failed to reply to request:", err)
@@ -123,7 +122,7 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 				return
 			}
 		} else if isUse, isExist := portUtil.Default.GetPortStatus(portToBind); isExist && isUse {
-			s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port. (03)\r\n", portToBind))
+			log.Printf("Port %d is already in use or restricted", portToBind)
 			err := req.Reply(false, nil)
 			if err != nil {
 				log.Println("Failed to reply to request:", err)
@@ -196,18 +195,16 @@ func (s *SSHSession) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 	s.forwarder.SetType(types.HTTP)
 	s.forwarder.SetForwardedPort(portToBind)
 	s.slugManager.Set(slug)
-	s.interaction.SendMessage("\033[H\033[2J")
-	s.interaction.ShowWelcomeMessage()
-	s.interaction.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s\r\n", protocol, slug, domain))
+	log.Printf("HTTP tunnel established: %s://%s.%s", protocol, slug, domain)
 	s.lifecycle.SetStatus(types.RUNNING)
-	s.interaction.HandleUserInput()
+	s.interaction.Start()
 }
 
 func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind uint16) {
 	log.Printf("Requested forwarding on %s:%d", addr, portToBind)
 	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", portToBind))
 	if err != nil {
-		s.interaction.SendMessage(fmt.Sprintf("Port %d is already in use or restricted. Please choose a different port.\r\n", portToBind))
+		log.Printf("Port %d is already in use or restricted", portToBind)
 		if setErr := portUtil.Default.SetPortStatus(portToBind, false); setErr != nil {
 			log.Printf("Failed to reset port status: %v", setErr)
 		}
@@ -256,12 +253,10 @@ func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind 
 	s.forwarder.SetType(types.TCP)
 	s.forwarder.SetListener(listener)
 	s.forwarder.SetForwardedPort(portToBind)
-	s.interaction.SendMessage("\033[H\033[2J")
-	s.interaction.ShowWelcomeMessage()
-	s.interaction.SendMessage(fmt.Sprintf("Forwarding your traffic to tcp://%s:%d \r\n", utils.Getenv("DOMAIN", "localhost"), s.forwarder.GetForwardedPort()))
+	log.Printf("TCP tunnel established: tcp://%s:%d", utils.Getenv("DOMAIN", "localhost"), s.forwarder.GetForwardedPort())
 	s.lifecycle.SetStatus(types.RUNNING)
 	go s.forwarder.AcceptTCPConnections()
-	s.interaction.HandleUserInput()
+	s.interaction.Start()
 }
 
 func generateUniqueSlug() string {
