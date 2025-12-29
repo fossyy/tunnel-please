@@ -29,6 +29,7 @@ type Controller interface {
 	SetLifecycle(lifecycle Lifecycle)
 	SetSlugModificator(func(oldSlug, newSlug string) bool)
 	Start()
+	SetWH(w, h int)
 }
 
 type Forwarder interface {
@@ -46,6 +47,15 @@ type Interaction struct {
 	program          *tea.Program
 	ctx              context.Context
 	cancel           context.CancelFunc
+}
+
+func (i *Interaction) SetWH(w, h int) {
+	if i.program != nil {
+		i.program.Send(tea.WindowSizeMsg{
+			Width:  w,
+			Height: h,
+		})
+	}
 }
 
 type commandItem struct {
@@ -69,6 +79,8 @@ type model struct {
 	slugInput         textinput.Model
 	slugError         string
 	interaction       *Interaction
+	width             int
+	height            int
 }
 
 type keymap struct {
@@ -115,6 +127,31 @@ func (i *Interaction) Stop() {
 	}
 }
 
+func getResponsiveWidth(screenWidth, padding, minWidth, maxWidth int) int {
+	width := screenWidth - padding
+	if width > maxWidth {
+		width = maxWidth
+	}
+	if width < minWidth {
+		width = minWidth
+	}
+	return width
+}
+
+func shouldUseCompactLayout(width int, threshold int) bool {
+	return width < threshold
+}
+
+func truncateString(s string, maxLength int) string {
+	if len(s) <= maxLength {
+		return s
+	}
+	if maxLength < 4 {
+		return s[:maxLength]
+	}
+	return s[:maxLength-3] + "..."
+}
+
 func (i commandItem) FilterValue() string { return i.name }
 func (i commandItem) Title() string       { return i.name }
 func (i commandItem) Description() string { return i.desc }
@@ -138,8 +175,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
 
 	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
 		m.commandList.SetWidth(msg.Width)
 		m.commandList.SetHeight(msg.Height - 4)
+
+		if msg.Width < 80 {
+			m.slugInput.Width = msg.Width - 10
+		} else {
+			m.slugInput.Width = 50
+		}
 		return m, nil
 
 	case tea.QuitMsg:
@@ -240,21 +285,35 @@ func (m model) View() string {
 	}
 
 	if m.showingComingSoon {
+		isCompact := shouldUseCompactLayout(m.width, 60)
+
+		var boxPadding int
+		var boxMargin int
+		if isCompact {
+			boxPadding = 1
+			boxMargin = 1
+		} else {
+			boxPadding = 3
+			boxMargin = 2
+		}
+
 		titleStyle := lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("#7D56F4")).
 			PaddingTop(1).
 			PaddingBottom(1)
 
+		messageBoxWidth := getResponsiveWidth(m.width, 10, 30, 60)
 		messageBoxStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FAFAFA")).
 			Background(lipgloss.Color("#1A1A2E")).
 			Bold(true).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#7D56F4")).
-			Padding(1, 3).
-			MarginTop(2).
-			MarginBottom(2).
+			Padding(1, boxPadding).
+			MarginTop(boxMargin).
+			MarginBottom(boxMargin).
+			Width(messageBoxWidth).
 			Align(lipgloss.Center)
 
 		helpStyle := lipgloss.NewStyle().
@@ -264,16 +323,53 @@ func (m model) View() string {
 
 		var b strings.Builder
 		b.WriteString("\n\n")
-		b.WriteString(titleStyle.Render("⏳ Coming Soon"))
+
+		var title string
+		if shouldUseCompactLayout(m.width, 40) {
+			title = "Coming Soon"
+		} else {
+			title = "⏳ Coming Soon"
+		}
+		b.WriteString(titleStyle.Render(title))
 		b.WriteString("\n\n")
-		b.WriteString(messageBoxStyle.Render("🚀 This feature is coming very soon!\n   Stay tuned for updates."))
+
+		var message string
+		if shouldUseCompactLayout(m.width, 50) {
+			message = "Coming soon!\nStay tuned."
+		} else {
+			message = "🚀 This feature is coming very soon!\n   Stay tuned for updates."
+		}
+		b.WriteString(messageBoxStyle.Render(message))
 		b.WriteString("\n\n")
-		b.WriteString(helpStyle.Render("This message will disappear in 5 seconds or press any key..."))
+
+		var helpText string
+		if shouldUseCompactLayout(m.width, 60) {
+			helpText = "Press any key..."
+		} else {
+			helpText = "This message will disappear in 5 seconds or press any key..."
+		}
+		b.WriteString(helpStyle.Render(helpText))
 
 		return b.String()
 	}
 
 	if m.editingSlug {
+		isCompact := shouldUseCompactLayout(m.width, 70)
+		isVeryCompact := shouldUseCompactLayout(m.width, 50)
+
+		var boxPadding int
+		var boxMargin int
+		if isVeryCompact {
+			boxPadding = 1
+			boxMargin = 1
+		} else if isCompact {
+			boxPadding = 1
+			boxMargin = 1
+		} else {
+			boxPadding = 2
+			boxMargin = 2
+		}
+
 		titleStyle := lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("#7D56F4")).
@@ -287,9 +383,9 @@ func (m model) View() string {
 		inputBoxStyle := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#7D56F4")).
-			Padding(1, 2).
-			MarginTop(2).
-			MarginBottom(2)
+			Padding(1, boxPadding).
+			MarginTop(boxMargin).
+			MarginBottom(boxMargin)
 
 		helpStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#666666")).
@@ -302,52 +398,88 @@ func (m model) View() string {
 			Bold(true).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#FF0000")).
-			Padding(0, 2).
+			Padding(0, boxPadding).
 			MarginTop(1).
 			MarginBottom(1)
 
+		rulesBoxWidth := getResponsiveWidth(m.width, 10, 30, 60)
 		rulesBoxStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FAFAFA")).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#7D56F4")).
-			Padding(0, 2).
+			Padding(0, boxPadding).
 			MarginTop(1).
-			MarginBottom(1)
+			MarginBottom(1).
+			Width(rulesBoxWidth)
 
 		var b strings.Builder
-		b.WriteString(titleStyle.Render("🔧 Edit Subdomain"))
+		var title string
+		if isVeryCompact {
+			title = "Edit Subdomain"
+		} else {
+			title = "🔧 Edit Subdomain"
+		}
+		b.WriteString(titleStyle.Render(title))
 		b.WriteString("\n\n")
 
 		if m.tunnelType != types.HTTP {
+			warningBoxWidth := getResponsiveWidth(m.width, 10, 30, 60)
 			warningBoxStyle := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#FFA500")).
 				Background(lipgloss.Color("#3D2000")).
 				Bold(true).
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(lipgloss.Color("#FFA500")).
-				Padding(1, 2).
-				MarginTop(2).
-				MarginBottom(2)
+				Padding(1, boxPadding).
+				MarginTop(boxMargin).
+				MarginBottom(boxMargin).
+				Width(warningBoxWidth)
 
-			b.WriteString(warningBoxStyle.Render("⚠️ TCP tunnels cannot have custom subdomains. Only HTTP/HTTPS tunnels support subdomain customization. "))
+			var warningText string
+			if isVeryCompact {
+				warningText = "⚠️ TCP tunnels don't support custom subdomains."
+			} else {
+				warningText = "⚠️ TCP tunnels cannot have custom subdomains. Only HTTP/HTTPS tunnels support subdomain customization."
+			}
+			b.WriteString(warningBoxStyle.Render(warningText))
 			b.WriteString("\n\n")
-			b.WriteString(helpStyle.Render("Press Enter or Esc to go back"))
+
+			var helpText string
+			if isVeryCompact {
+				helpText = "Press any key to go back"
+			} else {
+				helpText = "Press Enter or Esc to go back"
+			}
+			b.WriteString(helpStyle.Render(helpText))
 			return b.String()
 		}
 
-		rulesContent := "📋 Rules: \n\t• 3-20 chars \n\t• a-z, 0-9, - \n\t• No leading/trailing -"
+		var rulesContent string
+		if isVeryCompact {
+			rulesContent = "Rules:\n3-20 chars\na-z, 0-9, -\nNo leading/trailing -"
+		} else if isCompact {
+			rulesContent = "📋 Rules:\n  • 3-20 chars\n  • a-z, 0-9, -\n  • No leading/trailing -"
+		} else {
+			rulesContent = "📋 Rules: \n\t• 3-20 chars \n\t• a-z, 0-9, - \n\t• No leading/trailing -"
+		}
 		b.WriteString(rulesBoxStyle.Render(rulesContent))
 		b.WriteString("\n")
 
-		b.WriteString(instructionStyle.Render("Enter your custom subdomain:"))
+		var instruction string
+		if isVeryCompact {
+			instruction = "Custom subdomain:"
+		} else {
+			instruction = "Enter your custom subdomain:"
+		}
+		b.WriteString(instructionStyle.Render(instruction))
 		b.WriteString("\n")
 
 		if m.slugError != "" {
 			errorInputBoxStyle := lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(lipgloss.Color("#FF0000")).
-				Padding(1, 2).
-				MarginTop(2).
+				Padding(1, boxPadding).
+				MarginTop(boxMargin).
 				MarginBottom(1)
 			b.WriteString(errorInputBoxStyle.Render(m.slugInput.View()))
 			b.WriteString("\n")
@@ -359,19 +491,33 @@ func (m model) View() string {
 		}
 
 		previewURL := buildURL(m.protocol, m.slugInput.Value(), m.domain)
+		previewWidth := getResponsiveWidth(m.width, 10, 30, 80)
+
+		if len(previewURL) > previewWidth-10 {
+			previewURL = truncateString(previewURL, previewWidth-10)
+		}
+
 		previewStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#04B575")).
 			Italic(true).
-			Width(80)
+			Width(previewWidth)
 		b.WriteString(previewStyle.Render(fmt.Sprintf("Preview: %s", previewURL)))
 		b.WriteString("\n")
 
-		b.WriteString(helpStyle.Render("Press Enter to save • CTRL+R for random • Esc to cancel"))
+		var helpText string
+		if isVeryCompact {
+			helpText = "Enter: save • CTRL+R: random • Esc: cancel"
+		} else {
+			helpText = "Press Enter to save • CTRL+R for random • Esc to cancel"
+		}
+		b.WriteString(helpStyle.Render(helpText))
 
 		return b.String()
 	}
 
 	if m.showingCommands {
+		isCompact := shouldUseCompactLayout(m.width, 60)
+
 		titleStyle := lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("#7D56F4")).
@@ -385,11 +531,25 @@ func (m model) View() string {
 
 		var b strings.Builder
 		b.WriteString("\n")
-		b.WriteString(titleStyle.Render("⚡ Commands"))
+
+		var title string
+		if shouldUseCompactLayout(m.width, 40) {
+			title = "Commands"
+		} else {
+			title = "⚡ Commands"
+		}
+		b.WriteString(titleStyle.Render(title))
 		b.WriteString("\n\n")
 		b.WriteString(m.commandList.View())
 		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("↑/↓ Navigate • Enter Select • Esc Cancel"))
+
+		var helpText string
+		if isCompact {
+			helpText = "↑/↓ Nav • Enter Select • Esc Cancel"
+		} else {
+			helpText = "↑/↓ Navigate • Enter Select • Esc Cancel"
+		}
+		b.WriteString(helpStyle.Render(helpText))
 
 		return b.String()
 	}
@@ -397,49 +557,151 @@ func (m model) View() string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("#7D56F4")).
-		PaddingTop(1).
-		PaddingBottom(1)
+		PaddingTop(1)
 
 	subtitleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#7D56F4")).
+		Foreground(lipgloss.Color("#888888")).
 		Italic(true)
 
 	urlStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#04B575")).
-		Underline(true)
+		Foreground(lipgloss.Color("#7D56F4")).
+		Underline(true).
+		Italic(true)
 
-	sectionTitleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FAFAFA")).
-		MarginTop(1).
-		MarginBottom(1)
-
-	forwardingStyle := lipgloss.NewStyle().
-		Bold(true).
+	urlBoxStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#04B575")).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#04B575")).
-		Padding(0, 2).
-		MarginTop(1).
-		MarginBottom(1)
+		Bold(true).
+		Italic(true)
+
+	keyHintStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#7D56F4")).
+		Bold(true)
 
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render("🚇 Tunnel Pls"))
-	b.WriteString("\n")
-	b.WriteString(subtitleStyle.Render("Project by Bagas"))
-	b.WriteString("\n")
-	b.WriteString(urlStyle.Render("https://fossy.my.id"))
-	b.WriteString("\n\n")
+	isCompact := shouldUseCompactLayout(m.width, 85)
 
-	b.WriteString(sectionTitleStyle.Render("Welcome to Tunnel!"))
+	var asciiArtMargin int
+	if isCompact {
+		asciiArtMargin = 0
+	} else {
+		asciiArtMargin = 1
+	}
+
+	asciiArtStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#7D56F4")).
+		MarginBottom(asciiArtMargin)
+
+	var asciiArt string
+	if shouldUseCompactLayout(m.width, 50) {
+		asciiArt = "TUNNEL PLS"
+	} else if isCompact {
+		asciiArt = `
+ ▀█▀ █ █ █▄ █ █▄ █ ██▀ █   ▄▀▀ █   ▄▀▀
+  █  ▀▄█ █ ▀█ █ ▀█ █▄▄ █▄▄ ▄█▀ █▄▄ ▄█▀`
+	} else {
+		asciiArt = `
+ ████████╗██╗   ██╗███╗   ██╗███╗   ██╗███████╗██╗         ██████╗ ██╗     ███████╗
+ ╚══██╔══╝██║   ██║████╗  ██║████╗  ██║██╔════╝██║         ██╔══██╗██║     ██╔════╝
+    ██║   ██║   ██║██╔██╗ ██║██╔██╗ ██║█████╗  ██║         ██████╔╝██║     ███████╗
+    ██║   ██║   ██║██║╚██╗██║██║╚██╗██║██╔══╝  ██║         ██╔═══╝ ██║     ╚════██║
+    ██║   ╚██████╔╝██║ ╚████║██║ ╚████║███████╗███████╗    ██║     ███████╗███████║
+    ╚═╝    ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═══╝╚══════╝╚══════╝    ╚═╝     ╚══════╝╚══════╝`
+	}
+
+	b.WriteString(asciiArtStyle.Render(asciiArt))
 	b.WriteString("\n")
 
-	b.WriteString("\n")
-	forwardingText := fmt.Sprintf("🌐 Forwarding your traffic to:\n   %s", m.tunnelURL)
-	b.WriteString(forwardingStyle.Render(forwardingText))
+	if !shouldUseCompactLayout(m.width, 60) {
+		b.WriteString(subtitleStyle.Render("Secure tunnel service by Bagas • "))
+		b.WriteString(urlStyle.Render("https://fossy.my.id"))
+		b.WriteString("\n\n")
+	} else {
+		b.WriteString("\n")
+	}
 
-	b.WriteString(m.helpView())
+	boxMaxWidth := getResponsiveWidth(m.width, 10, 40, 80)
+	var boxPadding int
+	var boxMargin int
+	if isCompact {
+		boxPadding = 1
+		boxMargin = 1
+	} else {
+		boxPadding = 2
+		boxMargin = 2
+	}
+
+	responsiveInfoBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#7D56F4")).
+		Padding(1, boxPadding).
+		MarginTop(boxMargin).
+		MarginBottom(boxMargin).
+		Width(boxMaxWidth)
+
+	urlDisplay := m.tunnelURL
+	if shouldUseCompactLayout(m.width, 80) && len(m.tunnelURL) > m.width-20 {
+		maxLen := m.width - 25
+		if maxLen > 10 {
+			urlDisplay = truncateString(m.tunnelURL, maxLen)
+		}
+	}
+
+	var infoContent string
+	if shouldUseCompactLayout(m.width, 70) {
+		infoContent = fmt.Sprintf("🌐 %s", urlBoxStyle.Render(urlDisplay))
+	} else if isCompact {
+		infoContent = fmt.Sprintf("🌐  Forwarding to:\n\n     %s", urlBoxStyle.Render(urlDisplay))
+	} else {
+		infoContent = fmt.Sprintf("🌐  F O R W A R D I N G   T O:\n\n     %s", urlBoxStyle.Render(urlDisplay))
+	}
+	b.WriteString(responsiveInfoBox.Render(infoContent))
+	b.WriteString("\n")
+
+	var quickActionsTitle string
+	if shouldUseCompactLayout(m.width, 50) {
+		quickActionsTitle = "Actions"
+	} else if isCompact {
+		quickActionsTitle = "Quick Actions"
+	} else {
+		quickActionsTitle = "✨ Quick Actions"
+	}
+	b.WriteString(titleStyle.Render(quickActionsTitle))
+	b.WriteString("\n")
+
+	var featureMargin int
+	if isCompact {
+		featureMargin = 1
+	} else {
+		featureMargin = 2
+	}
+
+	compactFeatureStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FAFAFA")).
+		MarginLeft(featureMargin)
+
+	var commandsText string
+	var quitText string
+	if shouldUseCompactLayout(m.width, 60) {
+		commandsText = fmt.Sprintf("  %s  Commands", keyHintStyle.Render("[C]"))
+		quitText = fmt.Sprintf("  %s  Quit", keyHintStyle.Render("[Q]"))
+	} else {
+		commandsText = fmt.Sprintf("  %s  Open commands menu", keyHintStyle.Render("[C]"))
+		quitText = fmt.Sprintf("  %s  Quit application", keyHintStyle.Render("[Q]"))
+	}
+
+	b.WriteString(compactFeatureStyle.Render(commandsText))
+	b.WriteString("\n")
+	b.WriteString(compactFeatureStyle.Render(quitText))
+
+	if !shouldUseCompactLayout(m.width, 70) {
+		b.WriteString("\n\n")
+		footerStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#666666")).
+			Italic(true)
+		b.WriteString(footerStyle.Render("Press 'C' to customize your tunnel settings"))
+	}
 
 	return b.String()
 }
@@ -517,6 +779,7 @@ func (i *Interaction) Start() {
 		tea.WithMouseCellMotion(),
 		tea.WithoutSignals(),
 		tea.WithoutSignalHandler(),
+		tea.WithFPS(30),
 	)
 
 	_, err := i.program.Run()

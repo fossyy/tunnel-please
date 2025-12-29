@@ -85,9 +85,9 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 				}
 				return
 			}
-			session.HandleTCPIPForward(tcpipReq)
+			go session.HandleTCPIPForward(tcpipReq)
 		})
-		go session.HandleGlobalRequest(reqs)
+		session.HandleGlobalRequest(reqs)
 	}
 	if err := session.lifecycle.Close(); err != nil {
 		log.Printf("failed to close session: %v", err)
