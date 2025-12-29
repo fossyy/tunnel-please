@@ -16,7 +16,16 @@ import (
 	"github.com/libdns/cloudflare"
 )
 
-type TLSManager struct {
+type TLSManager interface {
+	userCertsExistAndValid() bool
+	loadUserCerts() error
+	startCertWatcher()
+	initCertMagic() error
+	getTLSConfig() *tls.Config
+	getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error)
+}
+
+type tlsManager struct {
 	domain      string
 	certPath    string
 	keyPath     string
@@ -30,7 +39,7 @@ type TLSManager struct {
 	useCertMagic bool
 }
 
-var tlsManager *TLSManager
+var globalTLSManager TLSManager
 var tlsManagerOnce sync.Once
 
 func NewTLSConfig(domain string) (*tls.Config, error) {
@@ -41,7 +50,7 @@ func NewTLSConfig(domain string) (*tls.Config, error) {
 		keyPath := "certs/tls/privkey.pem"
 		storagePath := "certs/tls/certmagic"
 
-		tm := &TLSManager{
+		tm := &tlsManager{
 			domain:      domain,
 			certPath:    certPath,
 			keyPath:     keyPath,
@@ -72,14 +81,14 @@ func NewTLSConfig(domain string) (*tls.Config, error) {
 			tm.useCertMagic = true
 		}
 
-		tlsManager = tm
+		globalTLSManager = tm
 	})
 
 	if initErr != nil {
 		return nil, initErr
 	}
 
-	return tlsManager.getTLSConfig(), nil
+	return globalTLSManager.getTLSConfig(), nil
 }
 
 func isACMEConfigComplete() bool {
@@ -87,7 +96,7 @@ func isACMEConfigComplete() bool {
 	return cfAPIToken != ""
 }
 
-func (tm *TLSManager) userCertsExistAndValid() bool {
+func (tm *tlsManager) userCertsExistAndValid() bool {
 	if _, err := os.Stat(tm.certPath); os.IsNotExist(err) {
 		log.Printf("Certificate file not found: %s", tm.certPath)
 		return false
@@ -158,7 +167,7 @@ func ValidateCertDomains(certPath, domain string) bool {
 	return hasBase && hasWildcard
 }
 
-func (tm *TLSManager) loadUserCerts() error {
+func (tm *tlsManager) loadUserCerts() error {
 	cert, err := tls.LoadX509KeyPair(tm.certPath, tm.keyPath)
 	if err != nil {
 		return err
@@ -172,7 +181,7 @@ func (tm *TLSManager) loadUserCerts() error {
 	return nil
 }
 
-func (tm *TLSManager) startCertWatcher() {
+func (tm *tlsManager) startCertWatcher() {
 	go func() {
 		var lastCertMod, lastKeyMod time.Time
 
@@ -227,7 +236,7 @@ func (tm *TLSManager) startCertWatcher() {
 	}()
 }
 
-func (tm *TLSManager) initCertMagic() error {
+func (tm *tlsManager) initCertMagic() error {
 	if err := os.MkdirAll(tm.storagePath, 0700); err != nil {
 		return fmt.Errorf("failed to create cert storage directory: %w", err)
 	}
@@ -289,14 +298,14 @@ func (tm *TLSManager) initCertMagic() error {
 	return nil
 }
 
-func (tm *TLSManager) getTLSConfig() *tls.Config {
+func (tm *tlsManager) getTLSConfig() *tls.Config {
 	return &tls.Config{
 		GetCertificate: tm.getCertificate,
 		MinVersion:     tls.VersionTLS12,
 	}
 }
 
-func (tm *TLSManager) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+func (tm *tlsManager) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	if tm.useCertMagic {
 		return tm.magic.GetCertificate(hello)
 	}

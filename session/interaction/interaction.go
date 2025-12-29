@@ -42,21 +42,37 @@ type Forwarder interface {
 }
 
 type Interaction struct {
-	InputLength      int
-	CommandBuffer    *bytes.Buffer
-	InteractiveMode  bool
-	InteractionType  types.InteractionType
-	EditSlug         string
+	inputLength      int
+	commandBuffer    *bytes.Buffer
+	interactiveMode  bool
+	interactionType  types.InteractionType
+	editSlug         string
 	channel          ssh.Channel
-	SlugManager      slug.Manager
-	Forwarder        Forwarder
-	Lifecycle        Lifecycle
+	slugManager      slug.Manager
+	forwarder        Forwarder
+	lifecycle        Lifecycle
 	pendingExit      bool
 	updateClientSlug func(oldSlug, newSlug string) bool
 }
 
+func NewInteraction(slugManager slug.Manager, forwarder Forwarder) *Interaction {
+	return &Interaction{
+		inputLength:      0,
+		commandBuffer:    bytes.NewBuffer(make([]byte, 0, 20)),
+		interactiveMode:  false,
+		interactionType:  "",
+		editSlug:         "",
+		channel:          nil,
+		slugManager:      slugManager,
+		forwarder:        forwarder,
+		lifecycle:        nil,
+		pendingExit:      false,
+		updateClientSlug: nil,
+	}
+}
+
 func (i *Interaction) SetLifecycle(lifecycle Lifecycle) {
-	i.Lifecycle = lifecycle
+	i.lifecycle = lifecycle
 }
 
 func (i *Interaction) SetChannel(channel ssh.Channel) {
@@ -77,7 +93,7 @@ func (i *Interaction) SendMessage(message string) {
 
 func (i *Interaction) HandleUserInput() {
 	buf := make([]byte, 1)
-	i.InteractiveMode = false
+	i.interactiveMode = false
 
 	for {
 		n, err := i.channel.Read(buf)
@@ -99,7 +115,7 @@ func (i *Interaction) handleReadError(err error) {
 }
 
 func (i *Interaction) processCharacter(char byte) {
-	if i.InteractiveMode {
+	if i.interactiveMode {
 		i.handleInteractiveMode(char)
 		return
 	}
@@ -113,7 +129,7 @@ func (i *Interaction) processCharacter(char byte) {
 }
 
 func (i *Interaction) handleInteractiveMode(char byte) {
-	switch i.InteractionType {
+	switch i.interactionType {
 	case types.Slug:
 		i.HandleSlugEditMode(char)
 	}
@@ -123,7 +139,7 @@ func (i *Interaction) handleExitSequence(char byte) bool {
 	if char == ctrlC {
 		if i.pendingExit {
 			i.SendMessage("Closing connection...\r\n")
-			if err := i.Lifecycle.Close(); err != nil {
+			if err := i.lifecycle.Close(); err != nil {
 				log.Printf("failed to close session: %v", err)
 			}
 			return true
@@ -147,37 +163,37 @@ func (i *Interaction) handleNonInteractiveInput(char byte) {
 		i.handleBackspace()
 	case char == forwardSlash:
 		i.handleCommandStart()
-	case i.CommandBuffer.Len() > 0:
+	case i.commandBuffer.Len() > 0:
 		i.handleCommandInput(char)
 	case char == enterChar:
 		i.SendMessage(clearLine)
 	default:
-		i.InputLength++
+		i.inputLength++
 	}
 }
 
 func (i *Interaction) handleBackspace() {
-	if i.InputLength > 0 {
+	if i.inputLength > 0 {
 		i.SendMessage(backspaceSeq)
 	}
-	if i.CommandBuffer.Len() > 0 {
-		i.CommandBuffer.Truncate(i.CommandBuffer.Len() - 1)
+	if i.commandBuffer.Len() > 0 {
+		i.commandBuffer.Truncate(i.commandBuffer.Len() - 1)
 	}
 }
 
 func (i *Interaction) handleCommandStart() {
-	i.CommandBuffer.Reset()
-	i.CommandBuffer.WriteByte(forwardSlash)
+	i.commandBuffer.Reset()
+	i.commandBuffer.WriteByte(forwardSlash)
 }
 
 func (i *Interaction) handleCommandInput(char byte) {
 	if char == enterChar {
 		i.SendMessage(clearLine)
-		i.HandleCommand(i.CommandBuffer.String())
+		i.HandleCommand(i.commandBuffer.String())
 		return
 	}
-	i.CommandBuffer.WriteByte(char)
-	i.InputLength++
+	i.commandBuffer.WriteByte(char)
+	i.inputLength++
 }
 
 func (i *Interaction) HandleSlugEditMode(char byte) {
@@ -194,15 +210,15 @@ func (i *Interaction) HandleSlugEditMode(char byte) {
 }
 
 func (i *Interaction) handleSlugBackspace() {
-	if len(i.EditSlug) > 0 {
-		i.EditSlug = i.EditSlug[:len(i.EditSlug)-1]
+	if len(i.editSlug) > 0 {
+		i.editSlug = i.editSlug[:len(i.editSlug)-1]
 		i.refreshSlugDisplay()
 	}
 }
 
 func (i *Interaction) appendToSlug(char byte) {
-	if isValidSlugChar(char) {
-		i.EditSlug += string(char)
+	if len(i.editSlug) < maxSlugLength {
+		i.editSlug += string(char)
 		i.refreshSlugDisplay()
 	}
 }
@@ -210,16 +226,16 @@ func (i *Interaction) appendToSlug(char byte) {
 func (i *Interaction) refreshSlugDisplay() {
 	domain := utils.Getenv("DOMAIN", "localhost")
 	i.SendMessage(clearToLineEnd)
-	i.SendMessage("➤ " + i.EditSlug + "." + domain)
+	i.SendMessage("➤ " + i.editSlug + "." + domain)
 }
 
 func (i *Interaction) HandleSlugSave() {
 	i.SendMessage(clearScreen)
 
 	switch {
-	case isForbiddenSlug(i.EditSlug):
+	case isForbiddenSlug(i.editSlug):
 		i.showForbiddenSlugMessage()
-	case !isValidSlug(i.EditSlug):
+	case !isValidSlug(i.editSlug):
 		i.showInvalidSlugMessage()
 	default:
 		i.updateSlug()
@@ -230,8 +246,8 @@ func (i *Interaction) HandleSlugSave() {
 }
 
 func (i *Interaction) updateSlug() {
-	oldSlug := i.SlugManager.Get()
-	newSlug := i.EditSlug
+	oldSlug := i.slugManager.Get()
+	newSlug := i.editSlug
 
 	if !i.updateClientSlug(oldSlug, newSlug) {
 		i.HandleSlugUpdateError()
@@ -262,8 +278,8 @@ func (i *Interaction) returnToMainScreen() {
 	i.SendMessage(clearScreen)
 	i.ShowWelcomeMessage()
 	i.ShowForwardingMessage()
-	i.InteractiveMode = false
-	i.CommandBuffer.Reset()
+	i.interactiveMode = false
+	i.commandBuffer.Reset()
 }
 
 func (i *Interaction) HandleSlugCancel() {
@@ -271,8 +287,8 @@ func (i *Interaction) HandleSlugCancel() {
 	i.SendMessage("\r\n\r\n⚠️ SUBDOMAIN EDIT CANCELLED ⚠️\r\n\r\n")
 	i.SendMessage("Press any key to continue...\r\n")
 
-	i.InteractiveMode = false
-	i.InteractionType = ""
+	i.interactiveMode = false
+	i.interactionType = ""
 	i.WaitForKeyPress()
 
 	i.SendMessage(clearScreen)
@@ -289,7 +305,7 @@ func (i *Interaction) HandleSlugUpdateError() {
 		time.Sleep(1 * time.Second)
 	}
 
-	if err := i.Lifecycle.Close(); err != nil {
+	if err := i.lifecycle.Close(); err != nil {
 		log.Printf("failed to close session: %v", err)
 	}
 }
@@ -308,12 +324,12 @@ func (i *Interaction) HandleCommand(command string) {
 		i.SendMessage("Unknown command\r\n")
 	}
 
-	i.CommandBuffer.Reset()
+	i.commandBuffer.Reset()
 }
 
 func (i *Interaction) handleByeCommand() {
 	i.SendMessage("Closing connection...\r\n")
-	if err := i.Lifecycle.Close(); err != nil {
+	if err := i.lifecycle.Close(); err != nil {
 		log.Printf("failed to close session: %v", err)
 	}
 }
@@ -329,32 +345,32 @@ func (i *Interaction) handleClearCommand() {
 }
 
 func (i *Interaction) handleSlugCommand() {
-	if i.Forwarder.GetTunnelType() != types.HTTP {
-		i.SendMessage(fmt.Sprintf("\r\n%s tunnels cannot have custom subdomains\r\n", i.Forwarder.GetTunnelType()))
+	if i.forwarder.GetTunnelType() != types.HTTP {
+		i.SendMessage(fmt.Sprintf("\r\n%s tunnels cannot have custom subdomains\r\n", i.forwarder.GetTunnelType()))
 		return
 	}
 
-	i.InteractiveMode = true
-	i.InteractionType = types.Slug
-	i.EditSlug = i.SlugManager.Get()
+	i.interactiveMode = true
+	i.interactionType = types.Slug
+	i.editSlug = i.slugManager.Get()
 	i.SendMessage(clearScreen)
 	i.DisplaySlugEditor()
 
 	domain := utils.Getenv("DOMAIN", "localhost")
-	i.SendMessage("➤ " + i.EditSlug + "." + domain)
+	i.SendMessage("➤ " + i.editSlug + "." + domain)
 }
 
 func (i *Interaction) ShowForwardingMessage() {
 	domain := utils.Getenv("DOMAIN", "localhost")
 
-	if i.Forwarder.GetTunnelType() == types.HTTP {
+	if i.forwarder.GetTunnelType() == types.HTTP {
 		protocol := "http"
 		if utils.Getenv("TLS_ENABLED", "false") == "true" {
 			protocol = "https"
 		}
-		i.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, i.SlugManager.Get(), domain))
+		i.SendMessage(fmt.Sprintf("Forwarding your traffic to %s://%s.%s \r\n", protocol, i.slugManager.Get(), domain))
 	} else {
-		i.SendMessage(fmt.Sprintf("Forwarding your traffic to tcp://%s:%d \r\n", domain, i.Forwarder.GetForwardedPort()))
+		i.SendMessage(fmt.Sprintf("Forwarding your traffic to tcp://%s:%d \r\n", domain, i.forwarder.GetForwardedPort()))
 	}
 }
 
@@ -385,7 +401,7 @@ func (i *Interaction) ShowWelcomeMessage() {
 
 func (i *Interaction) DisplaySlugEditor() {
 	domain := utils.Getenv("DOMAIN", "localhost")
-	fullDomain := i.SlugManager.Get() + "." + domain
+	fullDomain := i.slugManager.Get() + "." + domain
 
 	contentLine := "  ║  Current:  " + fullDomain
 	boxWidth := calculateBoxWidth(contentLine)

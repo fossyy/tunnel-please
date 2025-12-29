@@ -14,21 +14,38 @@ type HeaderManager interface {
 	Finalize() []byte
 }
 
-type ResponseHeaderFactory struct {
+type ResponseHeaderManager interface {
+	Get(key string) string
+	Set(key string, value string)
+	Remove(key string)
+	Finalize() []byte
+}
+
+type RequestHeaderManager interface {
+	Get(key string) string
+	Set(key string, value string)
+	Remove(key string)
+	Finalize() []byte
+	GetMethod() string
+	GetPath() string
+	GetVersion() string
+}
+
+type responseHeaderFactory struct {
 	startLine []byte
 	headers   map[string]string
 }
 
-type RequestHeaderFactory struct {
-	Method    string
-	Path      string
-	Version   string
+type requestHeaderFactory struct {
+	method    string
+	path      string
+	version   string
 	startLine []byte
 	headers   map[string]string
 }
 
-func NewRequestHeaderFactory(br *bufio.Reader) (*RequestHeaderFactory, error) {
-	header := &RequestHeaderFactory{
+func NewRequestHeaderFactory(br *bufio.Reader) (RequestHeaderManager, error) {
+	header := &requestHeaderFactory{
 		headers: make(map[string]string),
 	}
 
@@ -44,9 +61,9 @@ func NewRequestHeaderFactory(br *bufio.Reader) (*RequestHeaderFactory, error) {
 		return nil, fmt.Errorf("invalid request line")
 	}
 
-	header.Method = parts[0]
-	header.Path = parts[1]
-	header.Version = parts[2]
+	header.method = parts[0]
+	header.path = parts[1]
+	header.version = parts[2]
 
 	for {
 		line, err := br.ReadString('\n')
@@ -69,8 +86,8 @@ func NewRequestHeaderFactory(br *bufio.Reader) (*RequestHeaderFactory, error) {
 	return header, nil
 }
 
-func NewResponseHeaderFactory(startLine []byte) *ResponseHeaderFactory {
-	header := &ResponseHeaderFactory{
+func NewResponseHeaderFactory(startLine []byte) ResponseHeaderManager {
+	header := &responseHeaderFactory{
 		startLine: nil,
 		headers:   make(map[string]string),
 	}
@@ -96,19 +113,19 @@ func NewResponseHeaderFactory(startLine []byte) *ResponseHeaderFactory {
 	return header
 }
 
-func (resp *ResponseHeaderFactory) Get(key string) string {
+func (resp *responseHeaderFactory) Get(key string) string {
 	return resp.headers[key]
 }
 
-func (resp *ResponseHeaderFactory) Set(key string, value string) {
+func (resp *responseHeaderFactory) Set(key string, value string) {
 	resp.headers[key] = value
 }
 
-func (resp *ResponseHeaderFactory) Remove(key string) {
+func (resp *responseHeaderFactory) Remove(key string) {
 	delete(resp.headers, key)
 }
 
-func (resp *ResponseHeaderFactory) Finalize() []byte {
+func (resp *responseHeaderFactory) Finalize() []byte {
 	var buf bytes.Buffer
 
 	buf.Write(resp.startLine)
@@ -125,7 +142,7 @@ func (resp *ResponseHeaderFactory) Finalize() []byte {
 	return buf.Bytes()
 }
 
-func (req *RequestHeaderFactory) Get(key string) string {
+func (req *requestHeaderFactory) Get(key string) string {
 	val, ok := req.headers[key]
 	if !ok {
 		return ""
@@ -133,15 +150,27 @@ func (req *RequestHeaderFactory) Get(key string) string {
 	return val
 }
 
-func (req *RequestHeaderFactory) Set(key string, value string) {
+func (req *requestHeaderFactory) Set(key string, value string) {
 	req.headers[key] = value
 }
 
-func (req *RequestHeaderFactory) Remove(key string) {
+func (req *requestHeaderFactory) Remove(key string) {
 	delete(req.headers, key)
 }
 
-func (req *RequestHeaderFactory) Finalize() []byte {
+func (req *requestHeaderFactory) GetMethod() string {
+	return req.method
+}
+
+func (req *requestHeaderFactory) GetPath() string {
+	return req.path
+}
+
+func (req *requestHeaderFactory) GetVersion() string {
+	return req.version
+}
+
+func (req *requestHeaderFactory) Finalize() []byte {
 	var buf bytes.Buffer
 
 	buf.Write(req.startLine)

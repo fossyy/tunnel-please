@@ -20,25 +20,63 @@ import (
 type Interaction interface {
 	SendMessage(message string)
 }
-type CustomWriter struct {
-	RemoteAddr  net.Addr
+
+type HTTPWriter interface {
+	io.Reader
+	io.Writer
+	SetInteraction(interaction Interaction)
+	AddInteraction(interaction Interaction)
+	GetRemoteAddr() net.Addr
+	GetWriter() io.Writer
+	AddResponseMiddleware(mw ResponseMiddleware)
+	AddRequestStartMiddleware(mw RequestMiddleware)
+	SetRequestHeader(header RequestHeaderManager)
+	GetRequestStartMiddleware() []RequestMiddleware
+}
+
+type customWriter struct {
+	remoteAddr  net.Addr
 	writer      io.Writer
 	reader      io.Reader
 	headerBuf   []byte
 	buf         []byte
-	respHeader  *ResponseHeaderFactory
-	reqHeader   *RequestHeaderFactory
+	respHeader  ResponseHeaderManager
+	reqHeader   RequestHeaderManager
 	interaction Interaction
 	respMW      []ResponseMiddleware
 	reqStartMW  []RequestMiddleware
 	reqEndMW    []RequestMiddleware
 }
 
-func (cw *CustomWriter) SetInteraction(interaction Interaction) {
+func (cw *customWriter) SetInteraction(interaction Interaction) {
 	cw.interaction = interaction
 }
 
-func (cw *CustomWriter) Read(p []byte) (int, error) {
+func (cw *customWriter) GetRemoteAddr() net.Addr {
+	return cw.remoteAddr
+}
+
+func (cw *customWriter) GetWriter() io.Writer {
+	return cw.writer
+}
+
+func (cw *customWriter) AddResponseMiddleware(mw ResponseMiddleware) {
+	cw.respMW = append(cw.respMW, mw)
+}
+
+func (cw *customWriter) AddRequestStartMiddleware(mw RequestMiddleware) {
+	cw.reqStartMW = append(cw.reqStartMW, mw)
+}
+
+func (cw *customWriter) SetRequestHeader(header RequestHeaderManager) {
+	cw.reqHeader = header
+}
+
+func (cw *customWriter) GetRequestStartMiddleware() []RequestMiddleware {
+	return cw.reqStartMW
+}
+
+func (cw *customWriter) Read(p []byte) (int, error) {
 	tmp := make([]byte, len(p))
 	read, err := cw.reader.Read(tmp)
 	if read == 0 && err != nil {
@@ -95,9 +133,9 @@ func (cw *CustomWriter) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func NewCustomWriter(writer io.Writer, reader io.Reader, remoteAddr net.Addr) *CustomWriter {
-	return &CustomWriter{
-		RemoteAddr:  remoteAddr,
+func NewCustomWriter(writer io.Writer, reader io.Reader, remoteAddr net.Addr) HTTPWriter {
+	return &customWriter{
+		remoteAddr:  remoteAddr,
 		writer:      writer,
 		reader:      reader,
 		buf:         make([]byte, 0, 4096),
@@ -129,7 +167,7 @@ func isHTTPHeader(buf []byte) bool {
 	return true
 }
 
-func (cw *CustomWriter) Write(p []byte) (int, error) {
+func (cw *customWriter) Write(p []byte) (int, error) {
 	if cw.respHeader != nil && len(cw.buf) == 0 && len(p) >= 5 && string(p[0:5]) == "HTTP/" {
 		cw.respHeader = nil
 	}
@@ -186,7 +224,7 @@ func (cw *CustomWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (cw *CustomWriter) AddInteraction(interaction Interaction) {
+func (cw *customWriter) AddInteraction(interaction Interaction) {
 	cw.interaction = interaction
 }
 
@@ -292,13 +330,13 @@ func Handler(conn net.Conn) {
 		return
 	}
 	cw := NewCustomWriter(conn, dstReader, conn.RemoteAddr())
-	cw.SetInteraction(sshSession.Interaction)
+	cw.SetInteraction(sshSession.GetInteraction())
 	forwardRequest(cw, reqhf, sshSession)
 	return
 }
 
-func forwardRequest(cw *CustomWriter, initialRequest *RequestHeaderFactory, sshSession *session.SSHSession) {
-	payload := sshSession.Forwarder.CreateForwardedTCPIPPayload(cw.RemoteAddr)
+func forwardRequest(cw HTTPWriter, initialRequest RequestHeaderManager, sshSession *session.SSHSession) {
+	payload := sshSession.GetForwarder().CreateForwardedTCPIPPayload(cw.GetRemoteAddr())
 
 	type channelResult struct {
 		channel ssh.Channel
@@ -308,7 +346,7 @@ func forwardRequest(cw *CustomWriter, initialRequest *RequestHeaderFactory, sshS
 	resultChan := make(chan channelResult, 1)
 
 	go func() {
-		channel, reqs, err := sshSession.Lifecycle.GetConnection().OpenChannel("forwarded-tcpip", payload)
+		channel, reqs, err := sshSession.GetLifecycle().GetConnection().OpenChannel("forwarded-tcpip", payload)
 		resultChan <- channelResult{channel, reqs, err}
 	}()
 
@@ -319,29 +357,28 @@ func forwardRequest(cw *CustomWriter, initialRequest *RequestHeaderFactory, sshS
 	case result := <-resultChan:
 		if result.err != nil {
 			log.Printf("Failed to open forwarded-tcpip channel: %v", result.err)
-			sshSession.Forwarder.WriteBadGatewayResponse(cw.writer)
+			sshSession.GetForwarder().WriteBadGatewayResponse(cw.GetWriter())
 			return
 		}
 		channel = result.channel
 		reqs = result.reqs
 	case <-time.After(5 * time.Second):
 		log.Printf("Timeout opening forwarded-tcpip channel")
-		sshSession.Forwarder.WriteBadGatewayResponse(cw.writer)
+		sshSession.GetForwarder().WriteBadGatewayResponse(cw.GetWriter())
 		return
 	}
 
 	go ssh.DiscardRequests(reqs)
 
 	fingerprintMiddleware := NewTunnelFingerprint()
-	forwardedForMiddleware := NewForwardedFor(cw.RemoteAddr)
+	forwardedForMiddleware := NewForwardedFor(cw.GetRemoteAddr())
 
-	cw.respMW = append(cw.respMW, fingerprintMiddleware)
-	cw.reqStartMW = append(cw.reqStartMW, forwardedForMiddleware)
-	cw.reqEndMW = nil
-	cw.reqHeader = initialRequest
+	cw.AddResponseMiddleware(fingerprintMiddleware)
+	cw.AddRequestStartMiddleware(forwardedForMiddleware)
+	cw.SetRequestHeader(initialRequest)
 
-	for _, m := range cw.reqStartMW {
-		if err := m.HandleRequest(cw.reqHeader); err != nil {
+	for _, m := range cw.GetRequestStartMiddleware() {
+		if err := m.HandleRequest(initialRequest); err != nil {
 			log.Printf("Error handling request: %v", err)
 			return
 		}
@@ -353,6 +390,6 @@ func forwardRequest(cw *CustomWriter, initialRequest *RequestHeaderFactory, sshS
 		return
 	}
 
-	sshSession.Forwarder.HandleConnection(cw, channel, cw.RemoteAddr)
+	sshSession.GetForwarder().HandleConnection(cw, channel, cw.GetRemoteAddr())
 	return
 }
