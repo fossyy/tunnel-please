@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     container: git.fossy.my.id/renovate-clanker/renovate:latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: renovate
         env:
           RENOVATE_CONFIG_FILE: ${{ gitea.workspace }}/renovate-config.js
