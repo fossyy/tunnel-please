@@ -1,7 +1,6 @@
 package session
 
 import (
-	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -53,7 +52,7 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 	slugManager := slug.NewManager()
 	forwarderManager := forwarder.NewForwarder(slugManager)
 	interactionManager := interaction.NewInteraction(slugManager, forwarderManager)
-	lifecycleManager := lifecycle.NewLifecycle(conn, interactionManager, forwarderManager, slugManager)
+	lifecycleManager := lifecycle.NewLifecycle(conn, forwarderManager, slugManager)
 
 	interactionManager.SetLifecycle(lifecycleManager)
 	interactionManager.SetSlugModificator(updateClientSlug)
@@ -80,15 +79,15 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 
 			tcpipReq := session.waitForTCPIPForward(forwardingReq)
 			if tcpipReq == nil {
-				session.interaction.SendMessage(fmt.Sprintf("Port forwarding request not received.\r\nEnsure you ran the correct command with -R flag.\r\nExample: ssh %s -p %s -R 80:localhost:3000\r\nFor more details, visit https://tunnl.live.\r\n\r\n", utils.Getenv("DOMAIN", "localhost"), utils.Getenv("PORT", "2200")))
+				log.Printf("Port forwarding request not received. Ensure you ran the correct command with -R flag. Example: ssh %s -p %s -R 80:localhost:3000", utils.Getenv("DOMAIN", "localhost"), utils.Getenv("PORT", "2200"))
 				if err := session.lifecycle.Close(); err != nil {
 					log.Printf("failed to close session: %v", err)
 				}
 				return
 			}
-			session.HandleTCPIPForward(tcpipReq)
+			go session.HandleTCPIPForward(tcpipReq)
 		})
-		go session.HandleGlobalRequest(reqs)
+		session.HandleGlobalRequest(reqs)
 	}
 	if err := session.lifecycle.Close(); err != nil {
 		log.Printf("failed to close session: %v", err)

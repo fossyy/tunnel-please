@@ -104,7 +104,6 @@ func HandlerTLS(conn net.Conn) {
 		return
 	}
 	cw := NewCustomWriter(conn, dstReader, conn.RemoteAddr())
-	cw.SetInteraction(sshSession.GetInteraction())
 	forwardRequest(cw, reqhf, sshSession)
 	return
 }

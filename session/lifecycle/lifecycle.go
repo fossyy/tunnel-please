@@ -11,10 +11,6 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-type Interaction interface {
-	SendMessage(string)
-}
-
 type Forwarder interface {
 	Close() error
 	GetTunnelType() types.TunnelType
@@ -25,18 +21,16 @@ type Lifecycle struct {
 	status           types.Status
 	conn             ssh.Conn
 	channel          ssh.Channel
-	interaction      Interaction
 	forwarder        Forwarder
 	slugManager      slug.Manager
 	unregisterClient func(slug string)
 }
 
-func NewLifecycle(conn ssh.Conn, interaction Interaction, forwarder Forwarder, slugManager slug.Manager) *Lifecycle {
+func NewLifecycle(conn ssh.Conn, forwarder Forwarder, slugManager slug.Manager) *Lifecycle {
 	return &Lifecycle{
 		status:           "",
 		conn:             conn,
 		channel:          nil,
-		interaction:      interaction,
 		forwarder:        forwarder,
 		slugManager:      slugManager,
 		unregisterClient: nil,
