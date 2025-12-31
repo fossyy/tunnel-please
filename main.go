@@ -8,13 +8,21 @@ import (
 	"os"
 	"tunnel_pls/server"
 	"tunnel_pls/utils"
+	"tunnel_pls/version"
 
 	"golang.org/x/crypto/ssh"
 )
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Println(version.GetVersion())
+		os.Exit(0)
+	}
+
 	log.SetOutput(os.Stdout)
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	log.Printf("Starting %s", version.GetVersion())
 
 	pprofEnabled := utils.Getenv("PPROF_ENABLED", "false")
 	if pprofEnabled == "true" {
@@ -30,7 +38,7 @@ func main() {
 
 	sshConfig := &ssh.ServerConfig{
 		NoClientAuth:  true,
-		ServerVersion: "SSH-2.0-TunnlPls-1.0",
+		ServerVersion: fmt.Sprintf("SSH-2.0-TunnlPls-%s", version.GetShortVersion()),
 	}
 
 	sshKeyPath := "certs/ssh/id_rsa"
