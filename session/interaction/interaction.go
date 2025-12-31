@@ -6,9 +6,10 @@ import (
 	"log"
 	"strings"
 	"time"
+	"tunnel_pls/internal/config"
+	"tunnel_pls/internal/random"
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
-	"tunnel_pls/utils"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -722,9 +723,9 @@ func (m model) View() string {
 func (i *Interaction) Start() {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 
-	domain := utils.Getenv("DOMAIN", "localhost")
+	domain := config.Getenv("DOMAIN", "localhost")
 	protocol := "http"
-	if utils.Getenv("TLS_ENABLED", "false") == "true" {
+	if config.Getenv("TLS_ENABLED", "false") == "true" {
 		protocol = "https"
 	}
 
@@ -811,7 +812,7 @@ func buildURL(protocol, subdomain, domain string) string {
 }
 
 func generateRandomSubdomain() string {
-	return utils.GenerateRandomString(20)
+	return random.GenerateRandomString(20)
 }
 
 func isValidSlug(slug string) bool {

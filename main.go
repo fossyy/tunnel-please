@@ -6,19 +6,28 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"tunnel_pls/internal/config"
+	"tunnel_pls/internal/key"
 	"tunnel_pls/server"
-	"tunnel_pls/utils"
+	"tunnel_pls/version"
 
 	"golang.org/x/crypto/ssh"
 )
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Println(version.GetVersion())
+		os.Exit(0)
+	}
+
 	log.SetOutput(os.Stdout)
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	pprofEnabled := utils.Getenv("PPROF_ENABLED", "false")
+	log.Printf("Starting %s", version.GetVersion())
+
+	pprofEnabled := config.Getenv("PPROF_ENABLED", "false")
 	if pprofEnabled == "true" {
-		pprofPort := utils.Getenv("PPROF_PORT", "6060")
+		pprofPort := config.Getenv("PPROF_PORT", "6060")
 		go func() {
 			pprofAddr := fmt.Sprintf("localhost:%s", pprofPort)
 			log.Printf("Starting pprof server on http://%s/debug/pprof/", pprofAddr)
@@ -30,11 +39,11 @@ func main() {
 
 	sshConfig := &ssh.ServerConfig{
 		NoClientAuth:  true,
-		ServerVersion: "SSH-2.0-TunnlPls-1.0",
+		ServerVersion: fmt.Sprintf("SSH-2.0-TunnlPls-%s", version.GetShortVersion()),
 	}
 
 	sshKeyPath := "certs/ssh/id_rsa"
-	if err := utils.GenerateSSHKeyIfNotExist(sshKeyPath); err != nil {
+	if err := key.GenerateSSHKeyIfNotExist(sshKeyPath); err != nil {
 		log.Fatalf("Failed to generate SSH key: %s", err)
 	}
 

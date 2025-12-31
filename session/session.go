@@ -4,11 +4,11 @@ import (
 	"log"
 	"sync"
 	"time"
+	"tunnel_pls/internal/config"
 	"tunnel_pls/session/forwarder"
 	"tunnel_pls/session/interaction"
 	"tunnel_pls/session/lifecycle"
 	"tunnel_pls/session/slug"
-	"tunnel_pls/utils"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -79,7 +79,7 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 
 			tcpipReq := session.waitForTCPIPForward(forwardingReq)
 			if tcpipReq == nil {
-				log.Printf("Port forwarding request not received. Ensure you ran the correct command with -R flag. Example: ssh %s -p %s -R 80:localhost:3000", utils.Getenv("DOMAIN", "localhost"), utils.Getenv("PORT", "2200"))
+				log.Printf("Port forwarding request not received. Ensure you ran the correct command with -R flag. Example: ssh %s -p %s -R 80:localhost:3000", config.Getenv("DOMAIN", "localhost"), config.Getenv("PORT", "2200"))
 				if err := session.lifecycle.Close(); err != nil {
 					log.Printf("failed to close session: %v", err)
 				}

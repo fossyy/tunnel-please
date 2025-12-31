@@ -7,9 +7,8 @@ import (
 	"log"
 	"net"
 	portUtil "tunnel_pls/internal/port"
+	"tunnel_pls/internal/random"
 	"tunnel_pls/types"
-
-	"tunnel_pls/utils"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -276,7 +275,7 @@ func generateUniqueSlug() string {
 	maxAttempts := 5
 
 	for i := 0; i < maxAttempts; i++ {
-		slug := utils.GenerateRandomString(20)
+		slug := random.GenerateRandomString(20)
 
 		clientsMutex.RLock()
 		_, exists := Clients[slug]

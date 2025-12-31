@@ -1,4 +1,4 @@
-package utils
+package key
 
 import (
 	"crypto/rand"
@@ -6,53 +6,11 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"log"
-	mathrand "math/rand"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
-	"time"
 
-	"github.com/joho/godotenv"
 	"golang.org/x/crypto/ssh"
 )
-
-func init() {
-	if _, err := os.Stat(".env"); err == nil {
-		if err := godotenv.Load(".env"); err != nil {
-			log.Printf("Warning: Failed to load .env file: %s", err)
-		}
-	}
-}
-
-func GenerateRandomString(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyz"
-	seededRand := mathrand.New(mathrand.NewSource(time.Now().UnixNano() + int64(mathrand.Intn(9999))))
-	var result strings.Builder
-	for i := 0; i < length; i++ {
-		randomIndex := seededRand.Intn(len(charset))
-		result.WriteString(string(charset[randomIndex]))
-	}
-	return result.String()
-}
-
-func Getenv(key, defaultValue string) string {
-	val := os.Getenv(key)
-	if val == "" {
-		val = defaultValue
-	}
-
-	return val
-}
-
-func GetBufferSize() int {
-	sizeStr := Getenv("BUFFER_SIZE", "32768")
-	size, err := strconv.Atoi(sizeStr)
-	if err != nil || size < 4096 || size > 1048576 {
-		return 32768
-	}
-	return size
-}
 
 func GenerateSSHKeyIfNotExist(keyPath string) error {
 	if _, err := os.Stat(keyPath); err == nil {

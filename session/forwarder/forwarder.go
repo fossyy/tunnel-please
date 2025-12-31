@@ -10,16 +10,16 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"tunnel_pls/internal/config"
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
-	"tunnel_pls/utils"
 
 	"golang.org/x/crypto/ssh"
 )
 
 var bufferPool = sync.Pool{
 	New: func() interface{} {
-		bufSize := utils.GetBufferSize()
+		bufSize := config.GetBufferSize()
 		return make([]byte, bufSize)
 	},
 }
