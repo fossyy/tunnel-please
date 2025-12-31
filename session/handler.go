@@ -106,7 +106,6 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 	}
 
 	portToBind := uint16(rawPortToBind)
-
 	if isBlockedPort(portToBind) {
 		log.Printf("Port %d is blocked or restricted", portToBind)
 		err := req.Reply(false, nil)

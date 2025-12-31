@@ -92,7 +92,7 @@ func (s *SSHSession) Start() error {
 	s.lifecycle.SetChannel(ch)
 	s.interaction.SetChannel(ch)
 
-	go s.HandleTCPIPForward(tcpipReq)
+	s.HandleTCPIPForward(tcpipReq)
 
 	if err := s.lifecycle.Close(); err != nil {
 		log.Printf("failed to close session: %v", err)
