@@ -107,6 +107,12 @@ jobs:
             else
               echo "IS_PRERELEASE=false" >> $GITHUB_OUTPUT
               echo "ADDITIONAL_TAG=latest" >> $GITHUB_OUTPUT
+              
+              MAJOR=$(echo "$VERSION" | cut -d. -f1)
+              MINOR=$(echo "$VERSION" | cut -d. -f2)
+              
+              echo "MAJOR=$MAJOR" >> $GITHUB_OUTPUT
+              echo "MINOR=$MINOR" >> $GITHUB_OUTPUT
             fi
           else
             echo "Invalid version format: $VERSION"
@@ -120,9 +126,27 @@ jobs:
           push: true
           tags: |
             git.fossy.my.id/${{ secrets.DOCKER_USERNAME }}/tunnel-please:v${{ steps.version.outputs.VERSION }}
+            git.fossy.my.id/${{ secrets.DOCKER_USERNAME }}/tunnel-please:v${{ steps.version.outputs.MAJOR }}.${{ steps.version.outputs.MINOR }}
+            git.fossy.my.id/${{ secrets.DOCKER_USERNAME }}/tunnel-please:v${{ steps.version.outputs.MAJOR }}
             git.fossy.my.id/${{ secrets.DOCKER_USERNAME }}/tunnel-please:${{ steps.version.outputs.ADDITIONAL_TAG }}
           platforms: linux/amd64,linux/arm64
           build-args: |
             VERSION=${{ steps.version.outputs.VERSION }}
             BUILD_DATE=${{ steps.version.outputs.BUILD_DATE }}
             COMMIT=${{ steps.version.outputs.COMMIT }}
+        if: steps.version.outputs.IS_PRERELEASE == 'false'
+
+      - name: Build and push Docker image for pre-release
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            git.fossy.my.id/${{ secrets.DOCKER_USERNAME }}/tunnel-please:v${{ steps.version.outputs.VERSION }}
+            git.fossy.my.id/${{ secrets.DOCKER_USERNAME }}/tunnel-please:${{ steps.version.outputs.ADDITIONAL_TAG }}
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ steps.version.outputs.VERSION }}
+            BUILD_DATE=${{ steps.version.outputs.BUILD_DATE }}
+            COMMIT=${{ steps.version.outputs.COMMIT }}
+        if: steps.version.outputs.IS_PRERELEASE == 'true'
