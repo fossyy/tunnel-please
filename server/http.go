@@ -99,8 +99,7 @@ func (cw *customWriter) Read(p []byte) (int, error) {
 		}
 	}
 
-	headerReader := bufio.NewReader(bytes.NewReader(header))
-	reqhf, err := NewRequestHeaderFactory(headerReader)
+	reqhf, err := NewRequestHeaderFactory(header)
 	if err != nil {
 		return 0, err
 	}
