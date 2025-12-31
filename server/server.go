@@ -5,7 +5,7 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"tunnel_pls/utils"
+	"tunnel_pls/internal/config"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -28,13 +28,13 @@ func (s *Server) GetHttpServer() *http.Server {
 	return s.httpServer
 }
 
-func NewServer(config *ssh.ServerConfig) *Server {
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", utils.Getenv("PORT", "2200")))
+func NewServer(sshConfig *ssh.ServerConfig) *Server {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", config.Getenv("PORT", "2200")))
 	if err != nil {
 		log.Fatalf("failed to listen on port 2200: %v", err)
 		return nil
 	}
-	if utils.Getenv("TLS_ENABLED", "false") == "true" {
+	if config.Getenv("TLS_ENABLED", "false") == "true" {
 		err = NewHTTPSServer()
 		if err != nil {
 			log.Fatalf("failed to start https server: %v", err)
@@ -46,7 +46,7 @@ func NewServer(config *ssh.ServerConfig) *Server {
 	}
 	return &Server{
 		conn:   &listener,
-		config: config,
+		config: sshConfig,
 	}
 }
 

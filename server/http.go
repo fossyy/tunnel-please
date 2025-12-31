@@ -11,8 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"tunnel_pls/internal/config"
 	"tunnel_pls/session"
-	"tunnel_pls/utils"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -231,12 +231,12 @@ func (cw *customWriter) AddInteraction(interaction Interaction) {
 var redirectTLS = false
 
 func NewHTTPServer() error {
-	httpPort := utils.Getenv("HTTP_PORT", "8080")
+	httpPort := config.Getenv("HTTP_PORT", "8080")
 	listener, err := net.Listen("tcp", ":"+httpPort)
 	if err != nil {
 		return errors.New("Error listening: " + err.Error())
 	}
-	if utils.Getenv("TLS_ENABLED", "false") == "true" && utils.Getenv("TLS_REDIRECT", "false") == "true" {
+	if config.Getenv("TLS_ENABLED", "false") == "true" && config.Getenv("TLS_REDIRECT", "false") == "true" {
 		redirectTLS = true
 	}
 	go func() {
@@ -288,7 +288,7 @@ func Handler(conn net.Conn) {
 
 	if redirectTLS {
 		_, err = conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
-			fmt.Sprintf("Location: https://%s.%s/\r\n", slug, utils.Getenv("DOMAIN", "localhost")) +
+			fmt.Sprintf("Location: https://%s.%s/\r\n", slug, config.Getenv("DOMAIN", "localhost")) +
 			"Content-Length: 0\r\n" +
 			"Connection: close\r\n" +
 			"\r\n"))

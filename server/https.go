@@ -8,13 +8,13 @@ import (
 	"log"
 	"net"
 	"strings"
+	"tunnel_pls/internal/config"
 	"tunnel_pls/session"
-	"tunnel_pls/utils"
 )
 
 func NewHTTPSServer() error {
-	domain := utils.Getenv("DOMAIN", "localhost")
-	httpsPort := utils.Getenv("HTTPS_PORT", "8443")
+	domain := config.Getenv("DOMAIN", "localhost")
+	httpsPort := config.Getenv("HTTPS_PORT", "8443")
 
 	tlsConfig, err := NewTLSConfig(domain)
 	if err != nil {

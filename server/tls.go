@@ -10,7 +10,7 @@ import (
 	"os"
 	"sync"
 	"time"
-	"tunnel_pls/utils"
+	"tunnel_pls/internal/config"
 
 	"github.com/caddyserver/certmagic"
 	"github.com/libdns/cloudflare"
@@ -92,7 +92,7 @@ func NewTLSConfig(domain string) (*tls.Config, error) {
 }
 
 func isACMEConfigComplete() bool {
-	cfAPIToken := utils.Getenv("CF_API_TOKEN", "")
+	cfAPIToken := config.Getenv("CF_API_TOKEN", "")
 	return cfAPIToken != ""
 }
 
@@ -241,9 +241,9 @@ func (tm *tlsManager) initCertMagic() error {
 		return fmt.Errorf("failed to create cert storage directory: %w", err)
 	}
 
-	acmeEmail := utils.Getenv("ACME_EMAIL", "admin@"+tm.domain)
-	cfAPIToken := utils.Getenv("CF_API_TOKEN", "")
-	acmeStaging := utils.Getenv("ACME_STAGING", "false") == "true"
+	acmeEmail := config.Getenv("ACME_EMAIL", "admin@"+tm.domain)
+	cfAPIToken := config.Getenv("CF_API_TOKEN", "")
+	acmeStaging := config.Getenv("ACME_STAGING", "false") == "true"
 
 	if cfAPIToken == "" {
 		return fmt.Errorf("CF_API_TOKEN environment variable is required for automatic certificate generation")

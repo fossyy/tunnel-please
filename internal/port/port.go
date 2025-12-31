@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"tunnel_pls/utils"
+	"tunnel_pls/internal/config"
 )
 
 type Manager interface {
@@ -28,7 +28,7 @@ var Default Manager = &manager{
 }
 
 func init() {
-	rawRange := utils.Getenv("ALLOWED_PORTS", "")
+	rawRange := config.Getenv("ALLOWED_PORTS", "")
 	if rawRange == "" {
 		return
 	}
