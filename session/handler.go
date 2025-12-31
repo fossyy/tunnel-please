@@ -164,16 +164,9 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 }
 
 func (s *SSHSession) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
-	slug := generateUniqueSlug()
-	if slug == "" {
-		err := req.Reply(false, nil)
-		if err != nil {
-			log.Println("Failed to reply to request:", err)
-		}
-		return
-	}
+	slug := random.GenerateRandomString(20)
 
-	if !registerClient(slug, s) {
+	if !s.registry.Register(slug, s) {
 		log.Printf("Failed to register client with slug: %s", slug)
 		err := req.Reply(false, nil)
 		if err != nil {
@@ -186,7 +179,7 @@ func (s *SSHSession) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 	err := binary.Write(buf, binary.BigEndian, uint32(portToBind))
 	if err != nil {
 		log.Println("Failed to write port to buffer:", err)
-		unregisterClient(slug)
+		s.registry.Remove(slug)
 		err = req.Reply(false, nil)
 		if err != nil {
 			log.Println("Failed to reply to request:", err)
@@ -198,7 +191,7 @@ func (s *SSHSession) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 	err = req.Reply(true, buf.Bytes())
 	if err != nil {
 		log.Println("Failed to reply to request:", err)
-		unregisterClient(slug)
+		s.registry.Remove(slug)
 		err = req.Reply(false, nil)
 		if err != nil {
 			log.Println("Failed to reply to request:", err)
@@ -269,25 +262,6 @@ func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind 
 	s.lifecycle.SetStatus(types.RUNNING)
 	go s.forwarder.AcceptTCPConnections()
 	s.interaction.Start()
-}
-
-func generateUniqueSlug() string {
-	maxAttempts := 5
-
-	for i := 0; i < maxAttempts; i++ {
-		slug := random.GenerateRandomString(20)
-
-		clientsMutex.RLock()
-		_, exists := Clients[slug]
-		clientsMutex.RUnlock()
-
-		if !exists {
-			return slug
-		}
-	}
-
-	log.Println("Failed to generate unique slug after multiple attempts")
-	return ""
 }
 
 func readSSHString(reader *bytes.Reader) (string, error) {

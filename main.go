@@ -9,6 +9,7 @@ import (
 	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/key"
 	"tunnel_pls/server"
+	"tunnel_pls/session"
 	"tunnel_pls/version"
 
 	"golang.org/x/crypto/ssh"
@@ -58,6 +59,11 @@ func main() {
 	}
 
 	sshConfig.AddHostKey(private)
-	app := server.NewServer(sshConfig)
+	sessionRegistry := session.NewRegistry()
+
+	app, err := server.NewServer(sshConfig, sessionRegistry)
+	if err != nil {
+		log.Fatalf("Failed to start server: %s", err)
+	}
 	app.Start()
 }

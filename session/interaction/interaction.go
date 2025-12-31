@@ -114,7 +114,7 @@ func (i *Interaction) SetChannel(channel ssh.Channel) {
 	i.channel = channel
 }
 
-func (i *Interaction) SetSlugModificator(modificator func(oldSlug, newSlug string) bool) {
+func (i *Interaction) SetSlugModificator(modificator func(oldSlug, newSlug string) (success bool)) {
 	i.updateClientSlug = modificator
 }
 
