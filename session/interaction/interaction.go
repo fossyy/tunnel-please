@@ -31,6 +31,7 @@ type Controller interface {
 	SetSlugModificator(func(oldSlug, newSlug string) bool)
 	Start()
 	SetWH(w, h int)
+	Redraw()
 }
 
 type Forwarder interface {
@@ -65,7 +66,6 @@ type commandItem struct {
 }
 
 type model struct {
-	tunnelURL         string
 	domain            string
 	protocol          string
 	tunnelType        types.TunnelType
@@ -82,6 +82,13 @@ type model struct {
 	interaction       *Interaction
 	width             int
 	height            int
+}
+
+func (m *model) getTunnelURL() string {
+	if m.tunnelType == types.HTTP {
+		return buildURL(m.protocol, m.interaction.slugManager.Get(), m.domain)
+	}
+	return fmt.Sprintf("tcp://%s:%d", m.domain, m.port)
 }
 
 type keymap struct {
@@ -163,11 +170,11 @@ func tickCmd(d time.Duration) tea.Cmd {
 	})
 }
 
-func (m model) Init() tea.Cmd {
+func (m *model) Init() tea.Cmd {
 	return tea.Batch(textinput.Blink, tea.WindowSize())
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
@@ -225,7 +232,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 
-				m.tunnelURL = buildURL(m.protocol, inputValue, m.domain)
 				m.editingSlug = false
 				m.slugError = ""
 				return m, tea.Batch(tea.ClearScreen, textinput.Blink)
@@ -291,14 +297,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) helpView() string {
+func (i *Interaction) Redraw() {
+	if i.program != nil {
+		i.program.Send(tea.ClearScreen())
+	}
+}
+
+func (m *model) helpView() string {
 	return "\n" + m.help.ShortHelpView([]key.Binding{
 		m.keymap.command,
 		m.keymap.quit,
 	})
 }
 
-func (m model) View() string {
+func (m *model) View() string {
 	if m.quitting {
 		return ""
 	}
@@ -659,11 +671,11 @@ func (m model) View() string {
 		MarginBottom(boxMargin).
 		Width(boxMaxWidth)
 
-	urlDisplay := m.tunnelURL
-	if shouldUseCompactLayout(m.width, 80) && len(m.tunnelURL) > m.width-20 {
+	urlDisplay := m.getTunnelURL()
+	if shouldUseCompactLayout(m.width, 80) && len(urlDisplay) > m.width-20 {
 		maxLen := m.width - 25
 		if maxLen > 10 {
-			urlDisplay = truncateString(m.tunnelURL, maxLen)
+			urlDisplay = truncateString(urlDisplay, maxLen)
 		}
 	}
 
@@ -737,13 +749,6 @@ func (i *Interaction) Start() {
 	tunnelType := i.forwarder.GetTunnelType()
 	port := i.forwarder.GetForwardedPort()
 
-	var tunnelURL string
-	if tunnelType == types.HTTP {
-		tunnelURL = buildURL(protocol, i.slugManager.Get(), domain)
-	} else {
-		tunnelURL = fmt.Sprintf("tcp://%s:%d", domain, port)
-	}
-
 	items := []list.Item{
 		commandItem{name: "slug", desc: "Set custom subdomain"},
 		commandItem{name: "tunnel-type", desc: "Change tunnel type (Coming Soon)"},
@@ -764,8 +769,7 @@ func (i *Interaction) Start() {
 	ti.CharLimit = 20
 	ti.Width = 50
 
-	m := model{
-		tunnelURL:   tunnelURL,
+	m := &model{
 		domain:      domain,
 		protocol:    protocol,
 		tunnelType:  tunnelType,

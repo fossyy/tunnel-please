@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"tunnel_pls/internal/config"
+	"tunnel_pls/internal/grpc/client"
 	"tunnel_pls/session"
 
 	"golang.org/x/crypto/ssh"
@@ -14,9 +15,10 @@ type Server struct {
 	conn            *net.Listener
 	config          *ssh.ServerConfig
 	sessionRegistry session.Registry
+	grpcClient      *client.Client
 }
 
-func NewServer(sshConfig *ssh.ServerConfig, sessionRegistry session.Registry) (*Server, error) {
+func NewServer(sshConfig *ssh.ServerConfig, sessionRegistry session.Registry, grpcClient *client.Client) (*Server, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", config.Getenv("PORT", "2200")))
 	if err != nil {
 		log.Fatalf("failed to listen on port 2200: %v", err)
@@ -42,6 +44,7 @@ func NewServer(sshConfig *ssh.ServerConfig, sessionRegistry session.Registry) (*
 		conn:            &listener,
 		config:          sshConfig,
 		sessionRegistry: sessionRegistry,
+		grpcClient:      grpcClient,
 	}, nil
 }
 
@@ -69,9 +72,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 		return
 	}
-
-	log.Println("SSH connection established:", sshConn.User())
-
+	//ctx := context.Background()
+	//log.Println("SSH connection established:", sshConn.User())
+	//get, err := s.grpcClient.IdentityService.Get(ctx, &gen.IdentifierRequest{Id: sshConn.User()})
+	//if err != nil {
+	//	return
+	//}
+	//fmt.Println(get)
 	sshSession := session.New(sshConn, forwardingReqs, chans, s.sessionRegistry)
 	err = sshSession.Start()
 	if err != nil {
