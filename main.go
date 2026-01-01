@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"time"
 	"tunnel_pls/internal/config"
+	"tunnel_pls/internal/grpc/client"
 	"tunnel_pls/internal/key"
 	"tunnel_pls/server"
 	"tunnel_pls/session"
@@ -61,9 +64,49 @@ func main() {
 	sshConfig.AddHostKey(private)
 	sessionRegistry := session.NewRegistry()
 
-	app, err := server.NewServer(sshConfig, sessionRegistry)
+	grpcClient, err := client.New(&client.GrpcConfig{
+		Address:            "localhost:8080",
+		UseTLS:             false,
+		InsecureSkipVerify: false,
+		Timeout:            10 * time.Second,
+		KeepAlive:          true,
+		MaxRetries:         3,
+	}, sessionRegistry)
+	if err != nil {
+		return
+	}
+	defer func(grpcClient *client.Client) {
+		err := grpcClient.Close()
+		if err != nil {
+
+		}
+	}(grpcClient)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	err = grpcClient.CheckServerHealth(ctx)
+	if err != nil {
+		log.Fatalf("gRPC health check failed: %s", err)
+		return
+	}
+	cancel()
+
+	ctx, cancel = context.WithCancel(context.Background())
+	//go func(err error) {
+	//	if !errors.Is(err, ctx.Err()) {
+	//		log.Fatalf("Event subscription error: %s", err)
+	//	}
+	//}(grpcClient.SubscribeEvents(ctx))
+	go func() {
+		err := grpcClient.SubscribeEvents(ctx)
+		if err != nil {
+			return
+		}
+	}()
+
+	app, err := server.NewServer(sshConfig, sessionRegistry, grpcClient)
 	if err != nil {
 		log.Fatalf("Failed to start server: %s", err)
 	}
 	app.Start()
+	cancel()
 }
