@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type GrpcConfig struct {
@@ -33,11 +34,12 @@ type GrpcConfig struct {
 }
 
 type Client struct {
-	conn            *grpc.ClientConn
-	config          *GrpcConfig
-	sessionRegistry session.Registry
-	slugService     proto.SlugChangeClient
-	eventService    proto.EventServiceClient
+	conn                       *grpc.ClientConn
+	config                     *GrpcConfig
+	sessionRegistry            session.Registry
+	slugService                proto.SlugChangeClient
+	eventService               proto.EventServiceClient
+	authorizeConnectionService proto.UserServiceClient
 }
 
 func DefaultConfig() *GrpcConfig {
@@ -111,13 +113,15 @@ func New(config *GrpcConfig, sessionRegistry session.Registry) (*Client, error) 
 
 	slugService := proto.NewSlugChangeClient(conn)
 	eventService := proto.NewEventServiceClient(conn)
+	authorizeConnectionService := proto.NewUserServiceClient(conn)
 
 	return &Client{
-		conn:            conn,
-		config:          config,
-		slugService:     slugService,
-		sessionRegistry: sessionRegistry,
-		eventService:    eventService,
+		conn:                       conn,
+		config:                     config,
+		slugService:                slugService,
+		sessionRegistry:            sessionRegistry,
+		eventService:               eventService,
+		authorizeConnectionService: authorizeConnectionService,
 	}, nil
 }
 
@@ -221,6 +225,35 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Cli
 				log.Printf("non-connection send error for slug change success: %v", err)
 				continue
 			}
+		case proto.EventType_GET_SESSIONS:
+			sessions := c.sessionRegistry.GetAllSessionFromUser(recv.GetGetSessionsEvent().GetIdentity())
+			var details []*proto.Detail
+			for _, ses := range sessions {
+				detail := ses.Detail()
+				details = append(details, &proto.Detail{
+					ForwardingType: detail.ForwardingType,
+					Slug:           detail.Slug,
+					UserId:         detail.UserID,
+					Active:         detail.Active,
+					StartedAt:      timestamppb.New(detail.StartedAt),
+				})
+			}
+			err = subscribe.Send(&proto.Client{
+				Type: proto.EventType_GET_SESSIONS,
+				Payload: &proto.Client_GetSessionsEvent{
+					GetSessionsEvent: &proto.GetSessionsResponse{
+						Details: details,
+					},
+				},
+			})
+			if err != nil {
+				if isConnectionError(err) {
+					log.Printf("connection error sending sessions success: %v", err)
+					return err
+				}
+				log.Printf("non-connection send error for sessions success: %v", err)
+				continue
+			}
 		default:
 			log.Printf("Unknown event type received: %v", recv.GetType())
 		}
@@ -229,6 +262,18 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Cli
 
 func (c *Client) GetConnection() *grpc.ClientConn {
 	return c.conn
+}
+
+func (c *Client) AuthorizeConn(ctx context.Context, token string) (authorized bool, err error) {
+	check, err := c.authorizeConnectionService.Check(ctx, &proto.CheckRequest{AuthToken: token})
+	if err != nil {
+		return false, err
+
+	}
+	if check.GetResponse() == proto.AuthorizationResponse_MESSAGE_TYPE_UNAUTHORIZED {
+		return false, nil
+	}
+	return true, nil
 }
 
 func (c *Client) Close() error {

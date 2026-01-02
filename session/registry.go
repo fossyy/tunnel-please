@@ -10,15 +10,18 @@ type Registry interface {
 	Update(oldSlug, newSlug string) error
 	Register(slug string, session *SSHSession) (success bool)
 	Remove(slug string)
+	GetAllSessionFromUser(user string) []*SSHSession
 }
 type registry struct {
-	mu      sync.RWMutex
-	clients map[string]*SSHSession
+	mu        sync.RWMutex
+	byUser    map[string]map[string]*SSHSession
+	slugIndex map[string]string
 }
 
 func NewRegistry() Registry {
 	return &registry{
-		clients: make(map[string]*SSHSession),
+		byUser:    make(map[string]map[string]*SSHSession),
+		slugIndex: make(map[string]string),
 	}
 }
 
@@ -26,7 +29,12 @@ func (r *registry) Get(slug string) (session *SSHSession, err error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	client, ok := r.clients[slug]
+	userID, ok := r.slugIndex[slug]
+	if !ok {
+		return nil, fmt.Errorf("session not found")
+	}
+
+	client, ok := r.byUser[userID][slug]
 	if !ok {
 		return nil, fmt.Errorf("session not found")
 	}
@@ -43,18 +51,30 @@ func (r *registry) Update(oldSlug, newSlug string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.clients[newSlug]; exists && newSlug != oldSlug {
-		return fmt.Errorf("someone already uses this subdomain")
-	}
-
-	client, ok := r.clients[oldSlug]
+	userID, ok := r.slugIndex[oldSlug]
 	if !ok {
 		return fmt.Errorf("session not found")
 	}
 
-	delete(r.clients, oldSlug)
+	if _, exists := r.slugIndex[newSlug]; exists && newSlug != oldSlug {
+		return fmt.Errorf("someone already uses this subdomain")
+	}
+
+	client, ok := r.byUser[userID][oldSlug]
+	if !ok {
+		return fmt.Errorf("session not found")
+	}
+
+	delete(r.byUser[userID], oldSlug)
+	delete(r.slugIndex, oldSlug)
+
 	client.slugManager.Set(newSlug)
-	r.clients[newSlug] = client
+	r.slugIndex[newSlug] = userID
+
+	if r.byUser[userID] == nil {
+		r.byUser[userID] = make(map[string]*SSHSession)
+	}
+	r.byUser[userID][newSlug] = client
 	return nil
 }
 
@@ -62,19 +82,50 @@ func (r *registry) Register(slug string, session *SSHSession) (success bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.clients[slug]; exists {
+	if _, exists := r.slugIndex[slug]; exists {
 		return false
 	}
 
-	r.clients[slug] = session
+	userID := session.userID
+	if r.byUser[userID] == nil {
+		r.byUser[userID] = make(map[string]*SSHSession)
+	}
+
+	r.byUser[userID][slug] = session
+	r.slugIndex[slug] = userID
 	return true
+}
+
+func (r *registry) GetAllSessionFromUser(user string) []*SSHSession {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	m := r.byUser[user]
+	if len(m) == 0 {
+		return []*SSHSession{}
+	}
+
+	sessions := make([]*SSHSession, 0, len(m))
+	for _, s := range m {
+		sessions = append(sessions, s)
+	}
+	return sessions
 }
 
 func (r *registry) Remove(slug string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	delete(r.clients, slug)
+	userID, ok := r.slugIndex[slug]
+	if !ok {
+		return
+	}
+
+	delete(r.byUser[userID], slug)
+	if len(r.byUser[userID]) == 0 {
+		delete(r.byUser, userID)
+	}
+	delete(r.slugIndex, slug)
 }
 
 func isValidSlug(slug string) bool {
