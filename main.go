@@ -91,13 +91,9 @@ func main() {
 	cancel()
 
 	ctx, cancel = context.WithCancel(context.Background())
-	//go func(err error) {
-	//	if !errors.Is(err, ctx.Err()) {
-	//		log.Fatalf("Event subscription error: %s", err)
-	//	}
-	//}(grpcClient.SubscribeEvents(ctx))
 	go func() {
-		err := grpcClient.SubscribeEvents(ctx)
+		identity := config.Getenv("DOMAIN", "localhost")
+		err = grpcClient.SubscribeEvents(ctx, identity)
 		if err != nil {
 			return
 		}
