@@ -28,7 +28,7 @@ type Lifecycle interface {
 type Controller interface {
 	SetChannel(channel ssh.Channel)
 	SetLifecycle(lifecycle Lifecycle)
-	SetSlugModificator(func(oldSlug, newSlug string) bool)
+	SetSlugModificator(func(oldSlug, newSlug string) error)
 	Start()
 	SetWH(w, h int)
 	Redraw()
@@ -45,7 +45,7 @@ type Interaction struct {
 	slugManager      slug.Manager
 	forwarder        Forwarder
 	lifecycle        Lifecycle
-	updateClientSlug func(oldSlug, newSlug string) bool
+	updateClientSlug func(oldSlug, newSlug string) error
 	program          *tea.Program
 	ctx              context.Context
 	cancel           context.CancelFunc
@@ -121,7 +121,7 @@ func (i *Interaction) SetChannel(channel ssh.Channel) {
 	i.channel = channel
 }
 
-func (i *Interaction) SetSlugModificator(modificator func(oldSlug, newSlug string) (success bool)) {
+func (i *Interaction) SetSlugModificator(modificator func(oldSlug, newSlug string) error) {
 	i.updateClientSlug = modificator
 }
 
@@ -218,20 +218,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(tea.ClearScreen, textinput.Blink)
 			case "enter":
 				inputValue := m.slugInput.Value()
-
-				if isForbiddenSlug(inputValue) {
-					m.slugError = "This subdomain is reserved. Please choose a different one."
-					return m, nil
-				} else if !isValidSlug(inputValue) {
-					m.slugError = "Invalid subdomain. Follow the rules."
+				if err := m.interaction.updateClientSlug(m.interaction.slugManager.Get(), inputValue); err != nil {
+					m.slugError = err.Error()
 					return m, nil
 				}
-
-				if !m.interaction.updateClientSlug(m.interaction.slugManager.Get(), inputValue) {
-					m.slugError = "Someone already uses this subdomain."
-					return m, nil
-				}
-
 				m.editingSlug = false
 				m.slugError = ""
 				return m, tea.Batch(tea.ClearScreen, textinput.Blink)
@@ -822,31 +812,4 @@ func buildURL(protocol, subdomain, domain string) string {
 
 func generateRandomSubdomain() string {
 	return random.GenerateRandomString(20)
-}
-
-func isValidSlug(slug string) bool {
-	if len(slug) < minSlugLength || len(slug) > maxSlugLength {
-		return false
-	}
-
-	if slug[0] == '-' || slug[len(slug)-1] == '-' {
-		return false
-	}
-
-	for _, c := range slug {
-		if !isValidSlugChar(byte(c)) {
-			return false
-		}
-	}
-
-	return true
-}
-
-func isValidSlugChar(c byte) bool {
-	return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'
-}
-
-func isForbiddenSlug(slug string) bool {
-	_, ok := forbiddenSlugs[slug]
-	return ok
 }

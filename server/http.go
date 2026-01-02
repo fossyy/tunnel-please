@@ -313,8 +313,8 @@ func (hs *httpServer) handler(conn net.Conn) {
 		return
 	}
 
-	sshSession, exist := hs.sessionRegistry.Get(slug)
-	if !exist {
+	sshSession, err := hs.sessionRegistry.Get(slug)
+	if err != nil {
 		_, err = conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
 			fmt.Sprintf("Location: https://tunnl.live/tunnel-not-found?slug=%s\r\n", slug) +
 			"Content-Length: 0\r\n" +
