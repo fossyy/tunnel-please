@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -63,6 +64,13 @@ func (s *Server) Start() {
 
 func (s *Server) handleConnection(conn net.Conn) {
 	sshConn, chans, forwardingReqs, err := ssh.NewServerConn(conn, s.config)
+	defer func(sshConn *ssh.ServerConn) {
+		err = sshConn.Close()
+		if err != nil {
+			log.Printf("failed to close SSH server: %v", err)
+		}
+	}(sshConn)
+
 	if err != nil {
 		log.Printf("failed to establish SSH connection: %v", err)
 		err := conn.Close()
@@ -72,14 +80,20 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 		return
 	}
-	//ctx := context.Background()
-	//log.Println("SSH connection established:", sshConn.User())
-	//get, err := s.grpcClient.IdentityService.Get(ctx, &gen.IdentifierRequest{Id: sshConn.User()})
-	//if err != nil {
-	//	return
-	//}
-	//fmt.Println(get)
-	sshSession := session.New(sshConn, forwardingReqs, chans, s.sessionRegistry)
+	ctx := context.Background()
+	log.Println("SSH connection established:", sshConn.User())
+
+	//Fallback: kalau auth gagal userID di set UNAUTHORIZED
+	authorized, _ := s.grpcClient.AuthorizeConn(ctx, sshConn.User())
+
+	var userID string
+	if authorized {
+		userID = sshConn.User()
+	} else {
+		userID = "UNAUTHORIZED"
+	}
+
+	sshSession := session.New(sshConn, forwardingReqs, chans, s.sessionRegistry, userID)
 	err = sshSession.Start()
 	if err != nil {
 		log.Printf("SSH session ended with error: %v", err)

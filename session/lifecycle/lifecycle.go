@@ -4,6 +4,8 @@ import (
 	"errors"
 	"io"
 	"net"
+	"time"
+
 	portUtil "tunnel_pls/internal/port"
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
@@ -24,16 +26,18 @@ type Lifecycle struct {
 	forwarder        Forwarder
 	slugManager      slug.Manager
 	unregisterClient func(slug string)
+	startedAt        time.Time
 }
 
 func NewLifecycle(conn ssh.Conn, forwarder Forwarder, slugManager slug.Manager) *Lifecycle {
 	return &Lifecycle{
-		status:           "",
+		status:           types.INITIALIZING,
 		conn:             conn,
 		channel:          nil,
 		forwarder:        forwarder,
 		slugManager:      slugManager,
 		unregisterClient: nil,
+		startedAt:        time.Now(),
 	}
 }
 
@@ -48,6 +52,8 @@ type SessionLifecycle interface {
 	GetChannel() ssh.Channel
 	SetChannel(channel ssh.Channel)
 	SetUnregisterClient(unregisterClient func(slug string))
+	IsActive() bool
+	StartedAt() time.Time
 }
 
 func (l *Lifecycle) GetChannel() ssh.Channel {
@@ -62,6 +68,9 @@ func (l *Lifecycle) GetConnection() ssh.Conn {
 }
 func (l *Lifecycle) SetStatus(status types.Status) {
 	l.status = status
+	if status == types.RUNNING && l.startedAt.IsZero() {
+		l.startedAt = time.Now()
+	}
 }
 
 func (l *Lifecycle) Close() error {
@@ -97,4 +106,12 @@ func (l *Lifecycle) Close() error {
 	}
 
 	return nil
+}
+
+func (l *Lifecycle) IsActive() bool {
+	return l.status == types.RUNNING
+}
+
+func (l *Lifecycle) StartedAt() time.Time {
+	return l.startedAt
 }

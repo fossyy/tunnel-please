@@ -28,6 +28,7 @@ type SSHSession struct {
 	forwarder     forwarder.ForwardingController
 	slugManager   slug.Manager
 	registry      Registry
+	userID        string
 }
 
 func (s *SSHSession) GetLifecycle() lifecycle.SessionLifecycle {
@@ -46,7 +47,7 @@ func (s *SSHSession) GetSlugManager() slug.Manager {
 	return s.slugManager
 }
 
-func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel, sessionRegistry Registry) *SSHSession {
+func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel, sessionRegistry Registry, userID string) *SSHSession {
 	slugManager := slug.NewManager()
 	forwarderManager := forwarder.NewForwarder(slugManager)
 	interactionManager := interaction.NewInteraction(slugManager, forwarderManager)
@@ -65,6 +66,25 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 		forwarder:     forwarderManager,
 		slugManager:   slugManager,
 		registry:      sessionRegistry,
+		userID:        userID,
+	}
+}
+
+type Detail struct {
+	ForwardingType string    `json:"forwarding_type,omitempty"`
+	Slug           string    `json:"slug,omitempty"`
+	UserID         string    `json:"user_id,omitempty"`
+	Active         bool      `json:"active,omitempty"`
+	StartedAt      time.Time `json:"started_at,omitempty"`
+}
+
+func (s *SSHSession) Detail() Detail {
+	return Detail{
+		ForwardingType: string(s.forwarder.GetTunnelType()),
+		Slug:           s.slugManager.Get(),
+		UserID:         s.userID,
+		Active:         s.lifecycle.IsActive(),
+		StartedAt:      s.lifecycle.StartedAt(),
 	}
 }
 
@@ -86,7 +106,7 @@ func (s *SSHSession) Start() error {
 		if err := s.lifecycle.Close(); err != nil {
 			log.Printf("failed to close session: %v", err)
 		}
-		return fmt.Errorf("No forwarding Request")
+		return fmt.Errorf("no forwarding Request")
 	}
 
 	s.lifecycle.SetChannel(ch)
