@@ -114,7 +114,7 @@ func (i *Interaction) SetChannel(channel ssh.Channel) {
 	i.channel = channel
 }
 
-func (i *Interaction) SetSlugModificator(modificator func(oldSlug, newSlug string) bool) {
+func (i *Interaction) SetSlugModificator(modificator func(oldSlug, newSlug string) (success bool)) {
 	i.updateClientSlug = modificator
 }
 
@@ -199,6 +199,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.editingSlug {
+			if m.tunnelType != types.HTTP {
+				m.editingSlug = false
+				m.slugError = ""
+				return m, tea.Batch(tea.ClearScreen, textinput.Blink)
+			}
 			switch msg.String() {
 			case "esc":
 				m.editingSlug = false

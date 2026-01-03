@@ -9,10 +9,9 @@ import (
 	"net"
 	"strings"
 	"tunnel_pls/internal/config"
-	"tunnel_pls/session"
 )
 
-func NewHTTPSServer() error {
+func (hs *httpServer) ListenAndServeTLS() error {
 	domain := config.Getenv("DOMAIN", "localhost")
 	httpsPort := config.Getenv("HTTPS_PORT", "8443")
 
@@ -38,13 +37,13 @@ func NewHTTPSServer() error {
 				continue
 			}
 
-			go HandlerTLS(conn)
+			go hs.handlerTLS(conn)
 		}
 	}()
 	return nil
 }
 
-func HandlerTLS(conn net.Conn) {
+func (hs *httpServer) handlerTLS(conn net.Conn) {
 	defer func() {
 		err := conn.Close()
 		if err != nil {
@@ -90,8 +89,8 @@ func HandlerTLS(conn net.Conn) {
 		return
 	}
 
-	sshSession, ok := session.Clients[slug]
-	if !ok {
+	sshSession, exist := hs.sessionRegistry.Get(slug)
+	if !exist {
 		_, err = conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
 			fmt.Sprintf("Location: https://tunnl.live/tunnel-not-found?slug=%s\r\n", slug) +
 			"Content-Length: 0\r\n" +

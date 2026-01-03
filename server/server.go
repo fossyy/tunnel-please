@@ -4,50 +4,45 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"net/http"
 	"tunnel_pls/internal/config"
+	"tunnel_pls/session"
 
 	"golang.org/x/crypto/ssh"
 )
 
 type Server struct {
-	conn       *net.Listener
-	config     *ssh.ServerConfig
-	httpServer *http.Server
+	conn            *net.Listener
+	config          *ssh.ServerConfig
+	sessionRegistry session.Registry
 }
 
-func (s *Server) GetConn() *net.Listener {
-	return s.conn
-}
-
-func (s *Server) GetConfig() *ssh.ServerConfig {
-	return s.config
-}
-
-func (s *Server) GetHttpServer() *http.Server {
-	return s.httpServer
-}
-
-func NewServer(sshConfig *ssh.ServerConfig) *Server {
+func NewServer(sshConfig *ssh.ServerConfig, sessionRegistry session.Registry) (*Server, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", config.Getenv("PORT", "2200")))
 	if err != nil {
 		log.Fatalf("failed to listen on port 2200: %v", err)
-		return nil
+		return nil, err
 	}
-	if config.Getenv("TLS_ENABLED", "false") == "true" {
-		err = NewHTTPSServer()
-		if err != nil {
-			log.Fatalf("failed to start https server: %v", err)
-		}
-	}
-	err = NewHTTPServer()
+
+	HttpServer := NewHTTPServer(sessionRegistry)
+	err = HttpServer.ListenAndServe()
 	if err != nil {
 		log.Fatalf("failed to start http server: %v", err)
+		return nil, err
 	}
+
+	if config.Getenv("TLS_ENABLED", "false") == "true" {
+		err = HttpServer.ListenAndServeTLS()
+		if err != nil {
+			log.Fatalf("failed to start https server: %v", err)
+			return nil, err
+		}
+	}
+
 	return &Server{
-		conn:   &listener,
-		config: sshConfig,
-	}
+		conn:            &listener,
+		config:          sshConfig,
+		sessionRegistry: sessionRegistry,
+	}, nil
 }
 
 func (s *Server) Start() {
@@ -61,4 +56,27 @@ func (s *Server) Start() {
 
 		go s.handleConnection(conn)
 	}
+}
+
+func (s *Server) handleConnection(conn net.Conn) {
+	sshConn, chans, forwardingReqs, err := ssh.NewServerConn(conn, s.config)
+	if err != nil {
+		log.Printf("failed to establish SSH connection: %v", err)
+		err := conn.Close()
+		if err != nil {
+			log.Printf("failed to close SSH connection: %v", err)
+			return
+		}
+		return
+	}
+
+	log.Println("SSH connection established:", sshConn.User())
+
+	sshSession := session.New(sshConn, forwardingReqs, chans, s.sessionRegistry)
+	err = sshSession.Start()
+	if err != nil {
+		log.Printf("SSH session ended with error: %v", err)
+		return
+	}
+	return
 }

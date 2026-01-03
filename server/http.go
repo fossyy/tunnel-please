@@ -17,15 +17,9 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-type Interaction interface {
-	SendMessage(message string)
-}
-
 type HTTPWriter interface {
 	io.Reader
 	io.Writer
-	SetInteraction(interaction Interaction)
-	AddInteraction(interaction Interaction)
 	GetRemoteAddr() net.Addr
 	GetWriter() io.Writer
 	AddResponseMiddleware(mw ResponseMiddleware)
@@ -35,21 +29,16 @@ type HTTPWriter interface {
 }
 
 type customWriter struct {
-	remoteAddr  net.Addr
-	writer      io.Writer
-	reader      io.Reader
-	headerBuf   []byte
-	buf         []byte
-	respHeader  ResponseHeaderManager
-	reqHeader   RequestHeaderManager
-	interaction Interaction
-	respMW      []ResponseMiddleware
-	reqStartMW  []RequestMiddleware
-	reqEndMW    []RequestMiddleware
-}
-
-func (cw *customWriter) SetInteraction(interaction Interaction) {
-	cw.interaction = interaction
+	remoteAddr net.Addr
+	writer     io.Writer
+	reader     io.Reader
+	headerBuf  []byte
+	buf        []byte
+	respHeader ResponseHeaderManager
+	reqHeader  RequestHeaderManager
+	respMW     []ResponseMiddleware
+	reqStartMW []RequestMiddleware
+	reqEndMW   []RequestMiddleware
 }
 
 func (cw *customWriter) GetRemoteAddr() net.Addr {
@@ -110,8 +99,7 @@ func (cw *customWriter) Read(p []byte) (int, error) {
 		}
 	}
 
-	headerReader := bufio.NewReader(bytes.NewReader(header))
-	reqhf, err := NewRequestHeaderFactory(headerReader)
+	reqhf, err := NewRequestHeaderFactory(header)
 	if err != nil {
 		return 0, err
 	}
@@ -135,11 +123,10 @@ func (cw *customWriter) Read(p []byte) (int, error) {
 
 func NewCustomWriter(writer io.Writer, reader io.Reader, remoteAddr net.Addr) HTTPWriter {
 	return &customWriter{
-		remoteAddr:  remoteAddr,
-		writer:      writer,
-		reader:      reader,
-		buf:         make([]byte, 0, 4096),
-		interaction: nil,
+		remoteAddr: remoteAddr,
+		writer:     writer,
+		reader:     reader,
+		buf:        make([]byte, 0, 4096),
 	}
 }
 
@@ -224,13 +211,23 @@ func (cw *customWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (cw *customWriter) AddInteraction(interaction Interaction) {
-	cw.interaction = interaction
-}
-
 var redirectTLS = false
 
-func NewHTTPServer() error {
+type HTTPServer interface {
+	ListenAndServe() error
+	ListenAndServeTLS() error
+	handler(conn net.Conn)
+	handlerTLS(conn net.Conn)
+}
+type httpServer struct {
+	sessionRegistry session.Registry
+}
+
+func NewHTTPServer(sessionRegistry session.Registry) HTTPServer {
+	return &httpServer{sessionRegistry: sessionRegistry}
+}
+
+func (hs *httpServer) ListenAndServe() error {
 	httpPort := config.Getenv("HTTP_PORT", "8080")
 	listener, err := net.Listen("tcp", ":"+httpPort)
 	if err != nil {
@@ -251,13 +248,13 @@ func NewHTTPServer() error {
 				continue
 			}
 
-			go Handler(conn)
+			go hs.handler(conn)
 		}
 	}()
 	return nil
 }
 
-func Handler(conn net.Conn) {
+func (hs *httpServer) handler(conn net.Conn) {
 	defer func() {
 		err := conn.Close()
 		if err != nil && !errors.Is(err, net.ErrClosed) {
@@ -316,8 +313,8 @@ func Handler(conn net.Conn) {
 		return
 	}
 
-	sshSession, ok := session.Clients[slug]
-	if !ok {
+	sshSession, exist := hs.sessionRegistry.Get(slug)
+	if !exist {
 		_, err = conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
 			fmt.Sprintf("Location: https://tunnl.live/tunnel-not-found?slug=%s\r\n", slug) +
 			"Content-Length: 0\r\n" +
