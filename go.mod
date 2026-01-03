@@ -8,12 +8,12 @@ require (
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/golang/protobuf v1.5.4
 	github.com/joho/godotenv v1.5.1
 	github.com/libdns/cloudflare v0.2.2
 	github.com/muesli/termenv v0.16.0
 	golang.org/x/crypto v0.46.0
 	google.golang.org/grpc v1.78.0
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
@@ -49,7 +49,6 @@ require (
 	golang.org/x/text v0.32.0 // indirect
 	golang.org/x/tools v0.39.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251029180050-ab9386a59fda // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
 )
 
 replace git.fossy.my.id/bagas/tunnel-please-grpc => ../tunnel-please-grpc
