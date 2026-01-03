@@ -83,17 +83,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 	ctx := context.Background()
 	log.Println("SSH connection established:", sshConn.User())
 
-	//Fallback: kalau auth gagal userID di set UNAUTHORIZED
-	authorized, _ := s.grpcClient.AuthorizeConn(ctx, sshConn.User())
-
-	var userID string
-	if authorized {
-		userID = sshConn.User()
-	} else {
-		userID = "UNAUTHORIZED"
+	user := "UNAUTHORIZED"
+	if s.grpcClient != nil {
+		_, u, _ := s.grpcClient.AuthorizeConn(ctx, sshConn.User())
+		user = u
 	}
 
-	sshSession := session.New(sshConn, forwardingReqs, chans, s.sessionRegistry, userID)
+	sshSession := session.New(sshConn, forwardingReqs, chans, s.sessionRegistry, user)
 	err = sshSession.Start()
 	if err != nil {
 		log.Printf("SSH session ended with error: %v", err)

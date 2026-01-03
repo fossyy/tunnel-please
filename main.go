@@ -7,6 +7,7 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"strings"
 	"time"
 	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/grpc/client"
@@ -28,6 +29,9 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	log.Printf("Starting %s", version.GetVersion())
+
+	mode := strings.ToLower(config.Getenv("MODE", "standalone"))
+	isNodeMode := mode == "node"
 
 	pprofEnabled := config.Getenv("PPROF_ENABLED", "false")
 	if pprofEnabled == "true" {
@@ -64,40 +68,55 @@ func main() {
 	sshConfig.AddHostKey(private)
 	sessionRegistry := session.NewRegistry()
 
-	grpcClient, err := client.New(&client.GrpcConfig{
-		Address:            "localhost:8080",
-		UseTLS:             false,
-		InsecureSkipVerify: false,
-		Timeout:            10 * time.Second,
-		KeepAlive:          true,
-		MaxRetries:         3,
-	}, sessionRegistry)
-	if err != nil {
-		return
-	}
-	defer func(grpcClient *client.Client) {
-		err := grpcClient.Close()
-		if err != nil {
+	var grpcClient *client.Client
+	var cancel context.CancelFunc = func() {}
+	var ctx context.Context = context.Background()
 
+	if isNodeMode {
+		grpcHost := config.Getenv("GRPC_ADDRESS", "localhost")
+		grpcPort := config.Getenv("GRPC_PORT", "8080")
+		grpcAddr := fmt.Sprintf("%s:%s", grpcHost, grpcPort)
+		nodeToken := config.Getenv("NODE_TOKEN", "")
+		if nodeToken == "" {
+			log.Fatalf("NODE_TOKEN is required in node mode")
+			return
 		}
-	}(grpcClient)
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	err = grpcClient.CheckServerHealth(ctx)
-	if err != nil {
-		log.Fatalf("gRPC health check failed: %s", err)
-		return
-	}
-	cancel()
-
-	ctx, cancel = context.WithCancel(context.Background())
-	go func() {
-		identity := config.Getenv("DOMAIN", "localhost")
-		err = grpcClient.SubscribeEvents(ctx, identity)
+		
+		grpcClient, err = client.New(&client.GrpcConfig{
+			Address:            grpcAddr,
+			UseTLS:             false,
+			InsecureSkipVerify: false,
+			Timeout:            10 * time.Second,
+			KeepAlive:          true,
+			MaxRetries:         3,
+		}, sessionRegistry)
 		if err != nil {
 			return
 		}
-	}()
+		defer func(grpcClient *client.Client) {
+			err := grpcClient.Close()
+			if err != nil {
+
+			}
+		}(grpcClient)
+
+		ctx, cancel = context.WithTimeout(context.Background(), time.Second*5)
+		err = grpcClient.CheckServerHealth(ctx)
+		if err != nil {
+			log.Fatalf("gRPC health check failed: %s", err)
+			return
+		}
+		cancel()
+
+		ctx, cancel = context.WithCancel(context.Background())
+		go func() {
+			identity := config.Getenv("DOMAIN", "localhost")
+			err = grpcClient.SubscribeEvents(ctx, identity, nodeToken)
+			if err != nil {
+				return
+			}
+		}()
+	}
 
 	app, err := server.NewServer(sshConfig, sessionRegistry, grpcClient)
 	if err != nil {

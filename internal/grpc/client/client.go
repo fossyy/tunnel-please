@@ -8,6 +8,8 @@ import (
 	"io"
 	"log"
 	"time"
+	"tunnel_pls/internal/config"
+
 	"tunnel_pls/session"
 
 	proto "git.fossy.my.id/bagas/tunnel-please-grpc/gen"
@@ -125,39 +127,95 @@ func New(config *GrpcConfig, sessionRegistry session.Registry) (*Client, error) 
 	}, nil
 }
 
-func (c *Client) SubscribeEvents(ctx context.Context, identity string) error {
-	subscribe, err := c.eventService.Subscribe(ctx)
-	if err != nil {
-		return err
-	}
-	err = subscribe.Send(&proto.Client{
-		Type: proto.EventType_AUTHENTICATION,
-		Payload: &proto.Client_AuthEvent{
-			AuthEvent: &proto.Authentication{
-				Identity:  identity,
-				AuthToken: "test_auth_key",
-			},
-		},
-	})
+func (c *Client) SubscribeEvents(ctx context.Context, identity, authToken string) error {
+	const (
+		baseBackoff = time.Second
+		maxBackoff  = 30 * time.Second
+	)
 
-	if err != nil {
-		log.Println("Authentication failed to send to gRPC server:", err)
-		return err
+	backoff := baseBackoff
+	wait := func() error {
+		if backoff <= 0 {
+			return nil
+		}
+		select {
+		case <-time.After(backoff):
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	log.Println("Authentication Successfully sent to gRPC server")
-	err = c.processEventStream(subscribe)
-	if err != nil {
-		return err
+	growBackoff := func() {
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
 	}
-	return nil
+
+	for {
+		subscribe, err := c.eventService.Subscribe(ctx)
+		if err != nil {
+			if !isConnectionError(err) {
+				return err
+			}
+			if status.Code(err) == codes.Unauthenticated {
+				return err
+			}
+			if err := wait(); err != nil {
+				return err
+			}
+			growBackoff()
+			continue
+		}
+
+		err = subscribe.Send(&proto.Node{
+			Type: proto.EventType_AUTHENTICATION,
+			Payload: &proto.Node_AuthEvent{
+				AuthEvent: &proto.Authentication{
+					Identity:  identity,
+					AuthToken: authToken,
+				},
+			},
+		})
+
+		if err != nil {
+			log.Println("Authentication failed to send to gRPC server:", err)
+			if isConnectionError(err) {
+				if err := wait(); err != nil {
+					return err
+				}
+				growBackoff()
+				continue
+			}
+			return err
+		}
+		log.Println("Authentication Successfully sent to gRPC server")
+		backoff = baseBackoff
+
+		if err = c.processEventStream(subscribe); err != nil {
+			if isConnectionError(err) {
+				log.Printf("Reconnect to controller within %v sec", backoff.Seconds())
+				if err := wait(); err != nil {
+					return err
+				}
+				growBackoff()
+				continue
+			}
+			return err
+		}
+	}
 }
 
-func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Client, proto.Controller]) error {
+func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Node, proto.Events]) error {
 	for {
 		recv, err := subscribe.Recv()
 		if err != nil {
 			if isConnectionError(err) {
 				log.Printf("connection error receiving from gRPC server: %v", err)
+				return err
+			}
+			if status.Code(err) == codes.Unauthenticated {
+				log.Printf("Authentication failed: %v", err)
 				return err
 			}
 			log.Printf("non-connection receive error from gRPC server: %v", err)
@@ -167,11 +225,11 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Cli
 		case proto.EventType_SLUG_CHANGE:
 			oldSlug := recv.GetSlugEvent().GetOld()
 			newSlug := recv.GetSlugEvent().GetNew()
-			session, err := c.sessionRegistry.Get(oldSlug)
+			sess, err := c.sessionRegistry.Get(oldSlug)
 			if err != nil {
-				errSend := subscribe.Send(&proto.Client{
+				errSend := subscribe.Send(&proto.Node{
 					Type: proto.EventType_SLUG_CHANGE_RESPONSE,
-					Payload: &proto.Client_SlugEventResponse{
+					Payload: &proto.Node_SlugEventResponse{
 						SlugEventResponse: &proto.SlugChangeEventResponse{
 							Success: false,
 							Message: err.Error(),
@@ -189,9 +247,9 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Cli
 			}
 			err = c.sessionRegistry.Update(oldSlug, newSlug)
 			if err != nil {
-				errSend := subscribe.Send(&proto.Client{
+				errSend := subscribe.Send(&proto.Node{
 					Type: proto.EventType_SLUG_CHANGE_RESPONSE,
-					Payload: &proto.Client_SlugEventResponse{
+					Payload: &proto.Node_SlugEventResponse{
 						SlugEventResponse: &proto.SlugChangeEventResponse{
 							Success: false,
 							Message: err.Error(),
@@ -207,10 +265,10 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Cli
 				}
 				continue
 			}
-			session.GetInteraction().Redraw()
-			err = subscribe.Send(&proto.Client{
+			sess.GetInteraction().Redraw()
+			err = subscribe.Send(&proto.Node{
 				Type: proto.EventType_SLUG_CHANGE_RESPONSE,
-				Payload: &proto.Client_SlugEventResponse{
+				Payload: &proto.Node_SlugEventResponse{
 					SlugEventResponse: &proto.SlugChangeEventResponse{
 						Success: true,
 						Message: "",
@@ -231,6 +289,7 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Cli
 			for _, ses := range sessions {
 				detail := ses.Detail()
 				details = append(details, &proto.Detail{
+					Node:           config.Getenv("domain", "localhost"),
 					ForwardingType: detail.ForwardingType,
 					Slug:           detail.Slug,
 					UserId:         detail.UserID,
@@ -238,9 +297,9 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Cli
 					StartedAt:      timestamppb.New(detail.StartedAt),
 				})
 			}
-			err = subscribe.Send(&proto.Client{
+			err = subscribe.Send(&proto.Node{
 				Type: proto.EventType_GET_SESSIONS,
-				Payload: &proto.Client_GetSessionsEvent{
+				Payload: &proto.Node_GetSessionsEvent{
 					GetSessionsEvent: &proto.GetSessionsResponse{
 						Details: details,
 					},
@@ -264,16 +323,16 @@ func (c *Client) GetConnection() *grpc.ClientConn {
 	return c.conn
 }
 
-func (c *Client) AuthorizeConn(ctx context.Context, token string) (authorized bool, err error) {
+func (c *Client) AuthorizeConn(ctx context.Context, token string) (authorized bool, user string, err error) {
 	check, err := c.authorizeConnectionService.Check(ctx, &proto.CheckRequest{AuthToken: token})
 	if err != nil {
-		return false, err
+		return false, "UNAUTHORIZED", err
+	}
 
-	}
 	if check.GetResponse() == proto.AuthorizationResponse_MESSAGE_TYPE_UNAUTHORIZED {
-		return false, nil
+		return false, "UNAUTHORIZED", nil
 	}
-	return true, nil
+	return true, check.GetUser(), nil
 }
 
 func (c *Client) Close() error {
@@ -289,15 +348,12 @@ func (c *Client) CheckServerHealth(ctx context.Context) error {
 	resp, err := healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{
 		Service: "",
 	})
-
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
-
 	if resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
 		return fmt.Errorf("server not serving: %v", resp.Status)
 	}
-
 	return nil
 }
 
