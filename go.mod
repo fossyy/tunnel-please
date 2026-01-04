@@ -3,7 +3,7 @@ module tunnel_pls
 go 1.25.5
 
 require (
-	git.fossy.my.id/bagas/tunnel-please-grpc v1.2.0
+	git.fossy.my.id/bagas/tunnel-please-grpc v1.3.0
 	github.com/caddyserver/certmagic v0.25.0
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10

@@ -40,7 +40,6 @@ type Client struct {
 	conn                       *grpc.ClientConn
 	config                     *GrpcConfig
 	sessionRegistry            session.Registry
-	slugService                proto.SlugChangeClient
 	eventService               proto.EventServiceClient
 	authorizeConnectionService proto.UserServiceClient
 	closing                    bool
@@ -115,14 +114,12 @@ func New(config *GrpcConfig, sessionRegistry session.Registry) (*Client, error) 
 		return nil, fmt.Errorf("failed to connect to gRPC server at %s: %w", config.Address, err)
 	}
 
-	slugService := proto.NewSlugChangeClient(conn)
 	eventService := proto.NewEventServiceClient(conn)
 	authorizeConnectionService := proto.NewUserServiceClient(conn)
 
 	return &Client{
 		conn:                       conn,
 		config:                     config,
-		slugService:                slugService,
 		sessionRegistry:            sessionRegistry,
 		eventService:               eventService,
 		authorizeConnectionService: authorizeConnectionService,
