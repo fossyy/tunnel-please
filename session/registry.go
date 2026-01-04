@@ -3,96 +3,109 @@ package session
 import (
 	"fmt"
 	"sync"
+	"tunnel_pls/types"
 )
 
+type Key = types.SessionKey
+
 type Registry interface {
-	Get(slug string) (session *SSHSession, err error)
-	Update(oldSlug, newSlug string) error
-	Register(slug string, session *SSHSession) (success bool)
-	Remove(slug string)
+	Get(key Key) (session *SSHSession, err error)
+	Update(oldKey, newKey Key) error
+	Register(key Key, session *SSHSession) (success bool)
+	Remove(key Key)
 	GetAllSessionFromUser(user string) []*SSHSession
 }
 type registry struct {
 	mu        sync.RWMutex
-	byUser    map[string]map[string]*SSHSession
-	slugIndex map[string]string
+	byUser    map[string]map[Key]*SSHSession
+	slugIndex map[Key]string
 }
 
 func NewRegistry() Registry {
 	return &registry{
-		byUser:    make(map[string]map[string]*SSHSession),
-		slugIndex: make(map[string]string),
+		byUser:    make(map[string]map[Key]*SSHSession),
+		slugIndex: make(map[Key]string),
 	}
 }
 
-func (r *registry) Get(slug string) (session *SSHSession, err error) {
+func (r *registry) Get(key Key) (session *SSHSession, err error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	userID, ok := r.slugIndex[slug]
+	userID, ok := r.slugIndex[key]
 	if !ok {
 		return nil, fmt.Errorf("session not found")
 	}
 
-	client, ok := r.byUser[userID][slug]
+	client, ok := r.byUser[userID][key]
 	if !ok {
 		return nil, fmt.Errorf("session not found")
 	}
 	return client, nil
 }
 
-func (r *registry) Update(oldSlug, newSlug string) error {
-	if isForbiddenSlug(newSlug) {
+func (r *registry) Update(oldKey, newKey Key) error {
+	if oldKey.Type != newKey.Type {
+		return fmt.Errorf("tunnel type cannot change")
+	}
+
+	if newKey.Type != types.HTTP {
+		return fmt.Errorf("non http tunnel cannot change slug")
+	}
+
+	if isForbiddenSlug(newKey.Id) {
 		return fmt.Errorf("this subdomain is reserved. Please choose a different one")
-	} else if !isValidSlug(newSlug) {
+	}
+
+	if !isValidSlug(newKey.Id) {
 		return fmt.Errorf("invalid subdomain. Follow the rules")
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	userID, ok := r.slugIndex[oldSlug]
+	userID, ok := r.slugIndex[oldKey]
 	if !ok {
 		return fmt.Errorf("session not found")
 	}
 
-	if _, exists := r.slugIndex[newSlug]; exists && newSlug != oldSlug {
+	if _, exists := r.slugIndex[newKey]; exists && newKey != oldKey {
 		return fmt.Errorf("someone already uses this subdomain")
 	}
 
-	client, ok := r.byUser[userID][oldSlug]
+	client, ok := r.byUser[userID][oldKey]
 	if !ok {
 		return fmt.Errorf("session not found")
 	}
 
-	delete(r.byUser[userID], oldSlug)
-	delete(r.slugIndex, oldSlug)
+	delete(r.byUser[userID], oldKey)
+	delete(r.slugIndex, oldKey)
 
-	client.slugManager.Set(newSlug)
-	r.slugIndex[newSlug] = userID
+	client.slugManager.Set(newKey.Id)
+	r.slugIndex[newKey] = userID
 
 	if r.byUser[userID] == nil {
-		r.byUser[userID] = make(map[string]*SSHSession)
+		r.byUser[userID] = make(map[Key]*SSHSession)
 	}
-	r.byUser[userID][newSlug] = client
+	r.byUser[userID][newKey] = client
 	return nil
 }
 
-func (r *registry) Register(slug string, session *SSHSession) (success bool) {
+func (r *registry) Register(key Key, session *SSHSession) (success bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.slugIndex[slug]; exists {
+	if _, exists := r.slugIndex[key]; exists {
 		return false
 	}
 
 	userID := session.userID
 	if r.byUser[userID] == nil {
-		r.byUser[userID] = make(map[string]*SSHSession)
+		r.byUser[userID] = make(map[Key]*SSHSession)
 	}
 
-	r.byUser[userID][slug] = session
-	r.slugIndex[slug] = userID
+	r.byUser[userID][key] = session
+	r.slugIndex[key] = userID
 	return true
 }
 
@@ -112,20 +125,20 @@ func (r *registry) GetAllSessionFromUser(user string) []*SSHSession {
 	return sessions
 }
 
-func (r *registry) Remove(slug string) {
+func (r *registry) Remove(key Key) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	userID, ok := r.slugIndex[slug]
+	userID, ok := r.slugIndex[key]
 	if !ok {
 		return
 	}
 
-	delete(r.byUser[userID], slug)
+	delete(r.byUser[userID], key)
 	if len(r.byUser[userID]) == 0 {
 		delete(r.byUser, userID)
 	}
-	delete(r.slugIndex, slug)
+	delete(r.slugIndex, key)
 }
 
 func isValidSlug(slug string) bool {

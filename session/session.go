@@ -9,6 +9,7 @@ import (
 	"tunnel_pls/session/interaction"
 	"tunnel_pls/session/lifecycle"
 	"tunnel_pls/session/slug"
+	"tunnel_pls/types"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -54,9 +55,15 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 	lifecycleManager := lifecycle.NewLifecycle(conn, forwarderManager, slugManager)
 
 	interactionManager.SetLifecycle(lifecycleManager)
-	interactionManager.SetSlugModificator(sessionRegistry.Update)
+	interactionManager.SetSlugModificator(func(oldSlug, newSlug string) error {
+		oldKey := types.SessionKey{Id: oldSlug, Type: forwarderManager.GetTunnelType()}
+		newKey := types.SessionKey{Id: newSlug, Type: forwarderManager.GetTunnelType()}
+		return sessionRegistry.Update(oldKey, newKey)
+	})
 	forwarderManager.SetLifecycle(lifecycleManager)
-	lifecycleManager.SetUnregisterClient(sessionRegistry.Remove)
+	lifecycleManager.SetUnregisterClient(func(key types.SessionKey) {
+		sessionRegistry.Remove(key)
+	})
 
 	return &SSHSession{
 		initialReq:    forwardingReq,

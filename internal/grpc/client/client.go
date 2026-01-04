@@ -9,6 +9,7 @@ import (
 	"log"
 	"time"
 	"tunnel_pls/internal/config"
+	"tunnel_pls/types"
 
 	"tunnel_pls/session"
 
@@ -201,7 +202,6 @@ func (c *Client) SubscribeEvents(ctx context.Context, identity, authToken string
 			if c.isConnectionError(err) {
 				log.Printf("Reconnect to controller within %v sec", backoff.Seconds())
 				if err = wait(); err != nil {
-					fmt.Println(err)
 					return err
 				}
 				growBackoff()
@@ -222,7 +222,11 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Nod
 		case proto.EventType_SLUG_CHANGE:
 			oldSlug := recv.GetSlugEvent().GetOld()
 			newSlug := recv.GetSlugEvent().GetNew()
-			sess, err := c.sessionRegistry.Get(oldSlug)
+			var userSession *session.SSHSession
+			userSession, err = c.sessionRegistry.Get(types.SessionKey{
+				Id:   oldSlug,
+				Type: types.HTTP,
+			})
 			if err != nil {
 				errSend := subscribe.Send(&proto.Node{
 					Type: proto.EventType_SLUG_CHANGE_RESPONSE,
@@ -241,7 +245,13 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Nod
 				}
 				continue
 			}
-			err = c.sessionRegistry.Update(oldSlug, newSlug)
+			err = c.sessionRegistry.Update(types.SessionKey{
+				Id:   oldSlug,
+				Type: types.HTTP,
+			}, types.SessionKey{
+				Id:   newSlug,
+				Type: types.HTTP,
+			})
 			if err != nil {
 				errSend := subscribe.Send(&proto.Node{
 					Type: proto.EventType_SLUG_CHANGE_RESPONSE,
@@ -260,7 +270,7 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Nod
 				}
 				continue
 			}
-			sess.GetInteraction().Redraw()
+			userSession.GetInteraction().Redraw()
 			err = subscribe.Send(&proto.Node{
 				Type: proto.EventType_SLUG_CHANGE_RESPONSE,
 				Payload: &proto.Node_SlugEventResponse{
