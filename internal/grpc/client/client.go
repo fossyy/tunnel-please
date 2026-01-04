@@ -284,7 +284,7 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Nod
 			for _, ses := range sessions {
 				detail := ses.Detail()
 				details = append(details, &proto.Detail{
-					Node:           config.Getenv("domain", "localhost"),
+					Node:           config.Getenv("DOMAIN", "localhost"),
 					ForwardingType: detail.ForwardingType,
 					Slug:           detail.Slug,
 					UserId:         detail.UserID,
