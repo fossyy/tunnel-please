@@ -7,7 +7,9 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/grpc/client"
@@ -68,10 +70,14 @@ func main() {
 	sshConfig.AddHostKey(private)
 	sessionRegistry := session.NewRegistry()
 
-	var grpcClient *client.Client
-	var cancel context.CancelFunc = func() {}
-	var ctx context.Context = context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
+	errChan := make(chan error, 2)
+	shutdownChan := make(chan os.Signal, 1)
+	signal.Notify(shutdownChan, os.Interrupt, syscall.SIGTERM)
+
+	var grpcClient *client.Client
 	if isNodeMode {
 		grpcHost := config.Getenv("GRPC_ADDRESS", "localhost")
 		grpcPort := config.Getenv("GRPC_PORT", "8080")
@@ -79,10 +85,9 @@ func main() {
 		nodeToken := config.Getenv("NODE_TOKEN", "")
 		if nodeToken == "" {
 			log.Fatalf("NODE_TOKEN is required in node mode")
-			return
 		}
-		
-		grpcClient, err = client.New(&client.GrpcConfig{
+
+		c, err := client.New(&client.GrpcConfig{
 			Address:            grpcAddr,
 			UseTLS:             false,
 			InsecureSkipVerify: false,
@@ -91,37 +96,46 @@ func main() {
 			MaxRetries:         3,
 		}, sessionRegistry)
 		if err != nil {
-			return
+			log.Fatalf("failed to create grpc client: %v", err)
 		}
-		defer func(grpcClient *client.Client) {
-			err := grpcClient.Close()
-			if err != nil {
+		grpcClient = c
 
-			}
-		}(grpcClient)
-
-		ctx, cancel = context.WithTimeout(context.Background(), time.Second*5)
-		err = grpcClient.CheckServerHealth(ctx)
-		if err != nil {
-			log.Fatalf("gRPC health check failed: %s", err)
-			return
+		healthCtx, healthCancel := context.WithTimeout(ctx, 5*time.Second)
+		if err := grpcClient.CheckServerHealth(healthCtx); err != nil {
+			healthCancel()
+			log.Fatalf("gRPC health check failed: %v", err)
 		}
-		cancel()
+		healthCancel()
 
-		ctx, cancel = context.WithCancel(context.Background())
 		go func() {
 			identity := config.Getenv("DOMAIN", "localhost")
-			err = grpcClient.SubscribeEvents(ctx, identity, nodeToken)
-			if err != nil {
-				return
+			if err := grpcClient.SubscribeEvents(ctx, identity, nodeToken); err != nil {
+				errChan <- fmt.Errorf("failed to subscribe to events: %w", err)
 			}
 		}()
 	}
 
-	app, err := server.NewServer(sshConfig, sessionRegistry, grpcClient)
-	if err != nil {
-		log.Fatalf("Failed to start server: %s", err)
+	go func() {
+		app, err := server.NewServer(sshConfig, sessionRegistry, grpcClient)
+		if err != nil {
+			errChan <- fmt.Errorf("failed to start server: %s", err)
+			return
+		}
+		app.Start()
+	}()
+
+	select {
+	case err := <-errChan:
+		log.Printf("error happen : %s", err)
+	case sig := <-shutdownChan:
+		log.Printf("received signal %s, shutting down", sig)
 	}
-	app.Start()
+
 	cancel()
+
+	if grpcClient != nil {
+		if err := grpcClient.Close(); err != nil {
+			log.Printf("failed to close grpc conn : %s", err)
+		}
+	}
 }

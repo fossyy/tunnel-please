@@ -42,6 +42,7 @@ type Client struct {
 	slugService                proto.SlugChangeClient
 	eventService               proto.EventServiceClient
 	authorizeConnectionService proto.UserServiceClient
+	closing                    bool
 }
 
 func DefaultConfig() *GrpcConfig {
@@ -155,16 +156,17 @@ func (c *Client) SubscribeEvents(ctx context.Context, identity, authToken string
 	for {
 		subscribe, err := c.eventService.Subscribe(ctx)
 		if err != nil {
-			if !isConnectionError(err) {
+			if errors.Is(err, context.Canceled) || status.Code(err) == codes.Canceled || ctx.Err() != nil {
 				return err
 			}
-			if status.Code(err) == codes.Unauthenticated {
+			if !c.isConnectionError(err) || status.Code(err) == codes.Unauthenticated {
 				return err
 			}
-			if err := wait(); err != nil {
+			if err = wait(); err != nil {
 				return err
 			}
 			growBackoff()
+			log.Printf("Reconnect to controller within %v sec", backoff.Seconds())
 			continue
 		}
 
@@ -180,8 +182,8 @@ func (c *Client) SubscribeEvents(ctx context.Context, identity, authToken string
 
 		if err != nil {
 			log.Println("Authentication failed to send to gRPC server:", err)
-			if isConnectionError(err) {
-				if err := wait(); err != nil {
+			if c.isConnectionError(err) {
+				if err = wait(); err != nil {
 					return err
 				}
 				growBackoff()
@@ -193,9 +195,13 @@ func (c *Client) SubscribeEvents(ctx context.Context, identity, authToken string
 		backoff = baseBackoff
 
 		if err = c.processEventStream(subscribe); err != nil {
-			if isConnectionError(err) {
+			if errors.Is(err, context.Canceled) || status.Code(err) == codes.Canceled || ctx.Err() != nil {
+				return err
+			}
+			if c.isConnectionError(err) {
 				log.Printf("Reconnect to controller within %v sec", backoff.Seconds())
-				if err := wait(); err != nil {
+				if err = wait(); err != nil {
+					fmt.Println(err)
 					return err
 				}
 				growBackoff()
@@ -210,16 +216,7 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Nod
 	for {
 		recv, err := subscribe.Recv()
 		if err != nil {
-			if isConnectionError(err) {
-				log.Printf("connection error receiving from gRPC server: %v", err)
-				return err
-			}
-			if status.Code(err) == codes.Unauthenticated {
-				log.Printf("Authentication failed: %v", err)
-				return err
-			}
-			log.Printf("non-connection receive error from gRPC server: %v", err)
-			continue
+			return err
 		}
 		switch recv.GetType() {
 		case proto.EventType_SLUG_CHANGE:
@@ -237,8 +234,7 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Nod
 					},
 				})
 				if errSend != nil {
-					if isConnectionError(errSend) {
-						log.Printf("connection error sending slug change failure: %v", errSend)
+					if c.isConnectionError(errSend) {
 						return errSend
 					}
 					log.Printf("non-connection send error for slug change failure: %v", errSend)
@@ -257,8 +253,7 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Nod
 					},
 				})
 				if errSend != nil {
-					if isConnectionError(errSend) {
-						log.Printf("connection error sending slug change failure: %v", errSend)
+					if c.isConnectionError(errSend) {
 						return errSend
 					}
 					log.Printf("non-connection send error for slug change failure: %v", errSend)
@@ -276,7 +271,7 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Nod
 				},
 			})
 			if err != nil {
-				if isConnectionError(err) {
+				if c.isConnectionError(err) {
 					log.Printf("connection error sending slug change success: %v", err)
 					return err
 				}
@@ -306,7 +301,7 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Nod
 				},
 			})
 			if err != nil {
-				if isConnectionError(err) {
+				if c.isConnectionError(err) {
 					log.Printf("connection error sending sessions success: %v", err)
 					return err
 				}
@@ -338,6 +333,7 @@ func (c *Client) AuthorizeConn(ctx context.Context, token string) (authorized bo
 func (c *Client) Close() error {
 	if c.conn != nil {
 		log.Printf("Closing gRPC connection to %s", c.config.Address)
+		c.closing = true
 		return c.conn.Close()
 	}
 	return nil
@@ -361,7 +357,10 @@ func (c *Client) GetConfig() *GrpcConfig {
 	return c.config
 }
 
-func isConnectionError(err error) bool {
+func (c *Client) isConnectionError(err error) bool {
+	if c.closing {
+		return false
+	}
 	if err == nil {
 		return false
 	}
