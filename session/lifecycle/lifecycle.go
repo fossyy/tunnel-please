@@ -25,7 +25,7 @@ type Lifecycle struct {
 	channel          ssh.Channel
 	forwarder        Forwarder
 	slugManager      slug.Manager
-	unregisterClient func(slug string)
+	unregisterClient func(key types.SessionKey)
 	startedAt        time.Time
 }
 
@@ -41,7 +41,7 @@ func NewLifecycle(conn ssh.Conn, forwarder Forwarder, slugManager slug.Manager) 
 	}
 }
 
-func (l *Lifecycle) SetUnregisterClient(unregisterClient func(slug string)) {
+func (l *Lifecycle) SetUnregisterClient(unregisterClient func(key types.SessionKey)) {
 	l.unregisterClient = unregisterClient
 }
 
@@ -51,7 +51,7 @@ type SessionLifecycle interface {
 	GetConnection() ssh.Conn
 	GetChannel() ssh.Channel
 	SetChannel(channel ssh.Channel)
-	SetUnregisterClient(unregisterClient func(slug string))
+	SetUnregisterClient(unregisterClient func(key types.SessionKey))
 	IsActive() bool
 	StartedAt() time.Time
 }
@@ -94,8 +94,9 @@ func (l *Lifecycle) Close() error {
 	}
 
 	clientSlug := l.slugManager.Get()
-	if clientSlug != "" {
-		l.unregisterClient(clientSlug)
+	if clientSlug != "" && l.unregisterClient != nil {
+		key := types.SessionKey{Id: clientSlug, Type: l.forwarder.GetTunnelType()}
+		l.unregisterClient(key)
 	}
 
 	if l.forwarder.GetTunnelType() == types.TCP {

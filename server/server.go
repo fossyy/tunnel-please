@@ -88,7 +88,6 @@ func (s *Server) handleConnection(conn net.Conn) {
 		_, u, _ := s.grpcClient.AuthorizeConn(ctx, sshConn.User())
 		user = u
 	}
-
 	sshSession := session.New(sshConn, forwardingReqs, chans, s.sessionRegistry, user)
 	err = sshSession.Start()
 	if err != nil {
