@@ -10,7 +10,7 @@ type Key = types.SessionKey
 
 type Registry interface {
 	Get(key Key) (session *SSHSession, err error)
-	Update(oldKey, newKey Key) error
+	Update(user string, oldKey, newKey Key) error
 	Register(key Key, session *SSHSession) (success bool)
 	Remove(key Key)
 	GetAllSessionFromUser(user string) []*SSHSession
@@ -44,7 +44,7 @@ func (r *registry) Get(key Key) (session *SSHSession, err error) {
 	return client, nil
 }
 
-func (r *registry) Update(oldKey, newKey Key) error {
+func (r *registry) Update(user string, oldKey, newKey Key) error {
 	if oldKey.Type != newKey.Type {
 		return fmt.Errorf("tunnel type cannot change")
 	}
@@ -64,30 +64,24 @@ func (r *registry) Update(oldKey, newKey Key) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	userID, ok := r.slugIndex[oldKey]
-	if !ok {
-		return fmt.Errorf("session not found")
-	}
-
 	if _, exists := r.slugIndex[newKey]; exists && newKey != oldKey {
 		return fmt.Errorf("someone already uses this subdomain")
 	}
-
-	client, ok := r.byUser[userID][oldKey]
+	client, ok := r.byUser[user][oldKey]
 	if !ok {
 		return fmt.Errorf("session not found")
 	}
 
-	delete(r.byUser[userID], oldKey)
+	delete(r.byUser[user], oldKey)
 	delete(r.slugIndex, oldKey)
 
 	client.slugManager.Set(newKey.Id)
-	r.slugIndex[newKey] = userID
+	r.slugIndex[newKey] = user
 
-	if r.byUser[userID] == nil {
-		r.byUser[userID] = make(map[Key]*SSHSession)
+	if r.byUser[user] == nil {
+		r.byUser[user] = make(map[Key]*SSHSession)
 	}
-	r.byUser[userID][newKey] = client
+	r.byUser[user][newKey] = client
 	return nil
 }
 
@@ -99,7 +93,7 @@ func (r *registry) Register(key Key, session *SSHSession) (success bool) {
 		return false
 	}
 
-	userID := session.userID
+	userID := session.lifecycle.GetUser()
 	if r.byUser[userID] == nil {
 		r.byUser[userID] = make(map[Key]*SSHSession)
 	}

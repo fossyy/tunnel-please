@@ -9,7 +9,6 @@ import (
 	"tunnel_pls/session/interaction"
 	"tunnel_pls/session/lifecycle"
 	"tunnel_pls/session/slug"
-	"tunnel_pls/types"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -29,7 +28,6 @@ type SSHSession struct {
 	forwarder     forwarder.ForwardingController
 	slugManager   slug.Manager
 	registry      Registry
-	userID        string
 }
 
 func (s *SSHSession) GetLifecycle() lifecycle.SessionLifecycle {
@@ -48,22 +46,16 @@ func (s *SSHSession) GetSlugManager() slug.Manager {
 	return s.slugManager
 }
 
-func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel, sessionRegistry Registry, userID string) *SSHSession {
+func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel, sessionRegistry Registry, user string) *SSHSession {
 	slugManager := slug.NewManager()
 	forwarderManager := forwarder.NewForwarder(slugManager)
 	interactionManager := interaction.NewInteraction(slugManager, forwarderManager)
-	lifecycleManager := lifecycle.NewLifecycle(conn, forwarderManager, slugManager)
+	lifecycleManager := lifecycle.NewLifecycle(conn, forwarderManager, slugManager, user)
 
 	interactionManager.SetLifecycle(lifecycleManager)
-	interactionManager.SetSlugModificator(func(oldSlug, newSlug string) error {
-		oldKey := types.SessionKey{Id: oldSlug, Type: forwarderManager.GetTunnelType()}
-		newKey := types.SessionKey{Id: newSlug, Type: forwarderManager.GetTunnelType()}
-		return sessionRegistry.Update(oldKey, newKey)
-	})
 	forwarderManager.SetLifecycle(lifecycleManager)
-	lifecycleManager.SetUnregisterClient(func(key types.SessionKey) {
-		sessionRegistry.Remove(key)
-	})
+	interactionManager.SetSessionRegistry(sessionRegistry)
+	lifecycleManager.SetSessionRegistry(sessionRegistry)
 
 	return &SSHSession{
 		initialReq:    forwardingReq,
@@ -73,7 +65,6 @@ func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan
 		forwarder:     forwarderManager,
 		slugManager:   slugManager,
 		registry:      sessionRegistry,
-		userID:        userID,
 	}
 }
 
@@ -89,7 +80,7 @@ func (s *SSHSession) Detail() Detail {
 	return Detail{
 		ForwardingType: string(s.forwarder.GetTunnelType()),
 		Slug:           s.slugManager.Get(),
-		UserID:         s.userID,
+		UserID:         s.lifecycle.GetUser(),
 		Active:         s.lifecycle.IsActive(),
 		StartedAt:      s.lifecycle.StartedAt(),
 	}

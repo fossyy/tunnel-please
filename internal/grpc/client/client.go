@@ -217,6 +217,7 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Nod
 		}
 		switch recv.GetType() {
 		case proto.EventType_SLUG_CHANGE:
+			user := recv.GetSlugEvent().GetUser()
 			oldSlug := recv.GetSlugEvent().GetOld()
 			newSlug := recv.GetSlugEvent().GetNew()
 			var userSession *session.SSHSession
@@ -242,7 +243,7 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Nod
 				}
 				continue
 			}
-			err = c.sessionRegistry.Update(types.SessionKey{
+			err = c.sessionRegistry.Update(user, types.SessionKey{
 				Id:   oldSlug,
 				Type: types.HTTP,
 			}, types.SessionKey{

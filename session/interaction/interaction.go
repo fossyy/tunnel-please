@@ -23,15 +23,20 @@ import (
 
 type Lifecycle interface {
 	Close() error
+	GetUser() string
+}
+
+type SessionRegistry interface {
+	Update(user string, oldKey, newKey types.SessionKey) error
 }
 
 type Controller interface {
 	SetChannel(channel ssh.Channel)
 	SetLifecycle(lifecycle Lifecycle)
-	SetSlugModificator(func(oldSlug, newSlug string) error)
 	Start()
 	SetWH(w, h int)
 	Redraw()
+	SetSessionRegistry(registry SessionRegistry)
 }
 
 type Forwarder interface {
@@ -41,14 +46,14 @@ type Forwarder interface {
 }
 
 type Interaction struct {
-	channel          ssh.Channel
-	slugManager      slug.Manager
-	forwarder        Forwarder
-	lifecycle        Lifecycle
-	updateClientSlug func(oldSlug, newSlug string) error
-	program          *tea.Program
-	ctx              context.Context
-	cancel           context.CancelFunc
+	channel         ssh.Channel
+	slugManager     slug.Manager
+	forwarder       Forwarder
+	lifecycle       Lifecycle
+	sessionRegistry SessionRegistry
+	program         *tea.Program
+	ctx             context.Context
+	cancel          context.CancelFunc
 }
 
 func (i *Interaction) SetWH(w, h int) {
@@ -102,15 +107,19 @@ type tickMsg time.Time
 func NewInteraction(slugManager slug.Manager, forwarder Forwarder) *Interaction {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Interaction{
-		channel:          nil,
-		slugManager:      slugManager,
-		forwarder:        forwarder,
-		lifecycle:        nil,
-		updateClientSlug: nil,
-		program:          nil,
-		ctx:              ctx,
-		cancel:           cancel,
+		channel:         nil,
+		slugManager:     slugManager,
+		forwarder:       forwarder,
+		lifecycle:       nil,
+		sessionRegistry: nil,
+		program:         nil,
+		ctx:             ctx,
+		cancel:          cancel,
 	}
+}
+
+func (i *Interaction) SetSessionRegistry(registry SessionRegistry) {
+	i.sessionRegistry = registry
 }
 
 func (i *Interaction) SetLifecycle(lifecycle Lifecycle) {
@@ -119,10 +128,6 @@ func (i *Interaction) SetLifecycle(lifecycle Lifecycle) {
 
 func (i *Interaction) SetChannel(channel ssh.Channel) {
 	i.channel = channel
-}
-
-func (i *Interaction) SetSlugModificator(modificator func(oldSlug, newSlug string) error) {
-	i.updateClientSlug = modificator
 }
 
 func (i *Interaction) Stop() {
@@ -218,7 +223,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(tea.ClearScreen, textinput.Blink)
 			case "enter":
 				inputValue := m.slugInput.Value()
-				if err := m.interaction.updateClientSlug(m.interaction.slugManager.Get(), inputValue); err != nil {
+				if err := m.interaction.sessionRegistry.Update(m.interaction.lifecycle.GetUser(), types.SessionKey{
+					Id:   m.interaction.slugManager.Get(),
+					Type: types.HTTP,
+				}, types.SessionKey{
+					Id:   inputValue,
+					Type: types.HTTP,
+				}); err != nil {
 					m.slugError = err.Error()
 					return m, nil
 				}
