@@ -316,6 +316,96 @@ func (c *Client) processEventStream(subscribe grpc.BidiStreamingClient[proto.Nod
 				log.Printf("non-connection send error for sessions success: %v", err)
 				continue
 			}
+		case proto.EventType_TERMINATE_SESSION:
+			user := recv.GetTerminateSessionEvent().GetUser()
+			tunnelTypeRaw := recv.GetTerminateSessionEvent().GetTunnelType()
+			slug := recv.GetTerminateSessionEvent().GetSlug()
+
+			var userSession *session.SSHSession
+			var tunnelType types.TunnelType
+			if tunnelTypeRaw == proto.TunnelType_HTTP {
+				tunnelType = types.HTTP
+			} else if tunnelTypeRaw == proto.TunnelType_TCP {
+				tunnelType = types.TCP
+			} else {
+				err = subscribe.Send(&proto.Node{
+					Type: proto.EventType_TERMINATE_SESSION,
+					Payload: &proto.Node_TerminateSessionEventResponse{
+						TerminateSessionEventResponse: &proto.TerminateSessionEventResponse{
+							Success: false,
+							Message: "unknown tunnel type recived",
+						},
+					},
+				})
+				if err != nil {
+					if c.isConnectionError(err) {
+						log.Printf("connection error sending sessions success: %v", err)
+						return err
+					}
+					log.Printf("non-connection send error for sessions success: %v", err)
+				}
+				continue
+			}
+			userSession, err = c.sessionRegistry.GetWithUser(user, types.SessionKey{
+				Id:   slug,
+				Type: tunnelType,
+			})
+			if err != nil {
+				err = subscribe.Send(&proto.Node{
+					Type: proto.EventType_TERMINATE_SESSION,
+					Payload: &proto.Node_TerminateSessionEventResponse{
+						TerminateSessionEventResponse: &proto.TerminateSessionEventResponse{
+							Success: false,
+							Message: err.Error(),
+						},
+					},
+				})
+				if err != nil {
+					if c.isConnectionError(err) {
+						log.Printf("connection error sending sessions success: %v", err)
+						return err
+					}
+					log.Printf("non-connection send error for sessions success: %v", err)
+				}
+				continue
+			}
+			err = userSession.GetLifecycle().Close()
+			if err != nil {
+				err = subscribe.Send(&proto.Node{
+					Type: proto.EventType_TERMINATE_SESSION,
+					Payload: &proto.Node_TerminateSessionEventResponse{
+						TerminateSessionEventResponse: &proto.TerminateSessionEventResponse{
+							Success: false,
+							Message: err.Error(),
+						},
+					},
+				})
+				if err != nil {
+					if c.isConnectionError(err) {
+						log.Printf("connection error sending sessions success: %v", err)
+						return err
+					}
+					log.Printf("non-connection send error for sessions success: %v", err)
+				}
+				continue
+			}
+			err = subscribe.Send(&proto.Node{
+				Type: proto.EventType_TERMINATE_SESSION,
+				Payload: &proto.Node_TerminateSessionEventResponse{
+					TerminateSessionEventResponse: &proto.TerminateSessionEventResponse{
+						Success: true,
+						Message: "",
+					},
+				},
+			})
+			if err != nil {
+				if c.isConnectionError(err) {
+					log.Printf("connection error sending sessions success: %v", err)
+					return err
+				}
+				log.Printf("non-connection send error for sessions success: %v", err)
+				continue
+			}
 		default:
 			log.Printf("Unknown event type received: %v", recv.GetType())
 		}
