@@ -11,8 +11,9 @@ const (
 type TunnelType string
 
 const (
-	HTTP TunnelType = "HTTP"
-	TCP  TunnelType = "TCP"
+	UNKNOWN TunnelType = "UNKNOWN"
+	HTTP    TunnelType = "HTTP"
+	TCP     TunnelType = "TCP"
 )
 
 type SessionKey struct {
