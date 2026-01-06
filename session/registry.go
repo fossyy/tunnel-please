@@ -10,6 +10,7 @@ type Key = types.SessionKey
 
 type Registry interface {
 	Get(key Key) (session *SSHSession, err error)
+	GetWithUser(user string, key Key) (session *SSHSession, err error)
 	Update(user string, oldKey, newKey Key) error
 	Register(key Key, session *SSHSession) (success bool)
 	Remove(key Key)
@@ -38,6 +39,17 @@ func (r *registry) Get(key Key) (session *SSHSession, err error) {
 	}
 
 	client, ok := r.byUser[userID][key]
+	if !ok {
+		return nil, fmt.Errorf("session not found")
+	}
+	return client, nil
+}
+
+func (r *registry) GetWithUser(user string, key Key) (session *SSHSession, err error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	client, ok := r.byUser[user][key]
 	if !ok {
 		return nil, fmt.Errorf("session not found")
 	}
