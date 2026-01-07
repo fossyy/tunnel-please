@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
+	"time"
 	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/grpc/client"
 	"tunnel_pls/session"
@@ -64,30 +66,32 @@ func (s *Server) Start() {
 
 func (s *Server) handleConnection(conn net.Conn) {
 	sshConn, chans, forwardingReqs, err := ssh.NewServerConn(conn, s.config)
-	defer func(sshConn *ssh.ServerConn) {
-		err = sshConn.Close()
-		if err != nil {
-			log.Printf("failed to close SSH server: %v", err)
-		}
-	}(sshConn)
-
 	if err != nil {
 		log.Printf("failed to establish SSH connection: %v", err)
-		err := conn.Close()
+		err = conn.Close()
 		if err != nil {
 			log.Printf("failed to close SSH connection: %v", err)
 			return
 		}
 		return
 	}
-	ctx := context.Background()
-	log.Println("SSH connection established:", sshConn.User())
+
+	defer func(sshConn *ssh.ServerConn) {
+		err = sshConn.Close()
+		if err != nil && !errors.Is(err, net.ErrClosed) {
+			log.Printf("failed to close SSH server: %v", err)
+		}
+	}(sshConn)
 
 	user := "UNAUTHORIZED"
 	if s.grpcClient != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 		_, u, _ := s.grpcClient.AuthorizeConn(ctx, sshConn.User())
 		user = u
+		cancel()
 	}
+
+	log.Println("SSH connection established:", sshConn.User())
 	sshSession := session.New(sshConn, forwardingReqs, chans, s.sessionRegistry, user)
 	err = sshSession.Start()
 	if err != nil {
