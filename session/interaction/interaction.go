@@ -672,22 +672,32 @@ func (m *model) View() string {
 		MarginBottom(boxMargin).
 		Width(boxMaxWidth)
 
-	urlDisplay := m.getTunnelURL()
-	if shouldUseCompactLayout(m.width, 80) && len(urlDisplay) > m.width-20 {
-		maxLen := m.width - 25
-		if maxLen > 10 {
-			urlDisplay = truncateString(urlDisplay, maxLen)
-		}
-	}
+	authenticatedUser := m.interaction.lifecycle.GetUser()
+
+	userInfoStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Bold(true)
+
+	sectionHeaderStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#888888")).
+		Bold(true)
+
+	addressStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FAFAFA"))
 
 	var infoContent string
 	if shouldUseCompactLayout(m.width, 70) {
-		infoContent = fmt.Sprintf("🌐 %s", urlBoxStyle.Render(urlDisplay))
-	} else if isCompact {
-		infoContent = fmt.Sprintf("🌐  Forwarding to:\n\n     %s", urlBoxStyle.Render(urlDisplay))
+		infoContent = fmt.Sprintf("👤 %s\n\n%s\n%s",
+			userInfoStyle.Render(authenticatedUser),
+			sectionHeaderStyle.Render("🌐 FORWARDING ADDRESS:"),
+			addressStyle.Render(fmt.Sprintf("   %s", urlBoxStyle.Render(m.getTunnelURL()))))
 	} else {
-		infoContent = fmt.Sprintf("🌐  F O R W A R D I N G   T O:\n\n     %s", urlBoxStyle.Render(urlDisplay))
+		infoContent = fmt.Sprintf("👤  Authenticated as: %s\n\n%s\n     %s",
+			userInfoStyle.Render(authenticatedUser),
+			sectionHeaderStyle.Render("🌐  FORWARDING ADDRESS:"),
+			addressStyle.Render(urlBoxStyle.Render(m.getTunnelURL())))
 	}
+
 	b.WriteString(responsiveInfoBox.Render(infoContent))
 	b.WriteString("\n")
 
