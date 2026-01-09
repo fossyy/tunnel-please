@@ -1,66 +1,309 @@
 package session
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+	"tunnel_pls/types"
+)
+
+type Key = types.SessionKey
 
 type Registry interface {
-	Get(slug string) (session *SSHSession, exist bool)
-	Update(oldSlug, newSlug string) (success bool)
-	Register(slug string, session *SSHSession) (success bool)
-	Remove(slug string)
+	Get(key Key) (session *SSHSession, err error)
+	GetWithUser(user string, key Key) (session *SSHSession, err error)
+	Update(user string, oldKey, newKey Key) error
+	Register(key Key, session *SSHSession) (success bool)
+	Remove(key Key)
+	GetAllSessionFromUser(user string) []*SSHSession
 }
 type registry struct {
-	mu      sync.RWMutex
-	clients map[string]*SSHSession
+	mu        sync.RWMutex
+	byUser    map[string]map[Key]*SSHSession
+	slugIndex map[Key]string
 }
 
 func NewRegistry() Registry {
 	return &registry{
-		clients: make(map[string]*SSHSession),
+		byUser:    make(map[string]map[Key]*SSHSession),
+		slugIndex: make(map[Key]string),
 	}
 }
 
-func (r *registry) Get(slug string) (session *SSHSession, exist bool) {
+func (r *registry) Get(key Key) (session *SSHSession, err error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	session, exist = r.clients[slug]
-	return
-}
-
-func (r *registry) Update(oldSlug, newSlug string) (success bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if _, exists := r.clients[newSlug]; exists && newSlug != oldSlug {
-		return false
-	}
-
-	client, ok := r.clients[oldSlug]
+	userID, ok := r.slugIndex[key]
 	if !ok {
-		return false
+		return nil, fmt.Errorf("session not found")
 	}
 
-	delete(r.clients, oldSlug)
-	client.slugManager.Set(newSlug)
-	r.clients[newSlug] = client
-	return true
+	client, ok := r.byUser[userID][key]
+	if !ok {
+		return nil, fmt.Errorf("session not found")
+	}
+	return client, nil
 }
 
-func (r *registry) Register(slug string, session *SSHSession) (success bool) {
+func (r *registry) GetWithUser(user string, key Key) (session *SSHSession, err error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	client, ok := r.byUser[user][key]
+	if !ok {
+		return nil, fmt.Errorf("session not found")
+	}
+	return client, nil
+}
+
+func (r *registry) Update(user string, oldKey, newKey Key) error {
+	if oldKey.Type != newKey.Type {
+		return fmt.Errorf("tunnel type cannot change")
+	}
+
+	if newKey.Type != types.HTTP {
+		return fmt.Errorf("non http tunnel cannot change slug")
+	}
+
+	if isForbiddenSlug(newKey.Id) {
+		return fmt.Errorf("this subdomain is reserved. Please choose a different one")
+	}
+
+	if !isValidSlug(newKey.Id) {
+		return fmt.Errorf("invalid subdomain. Follow the rules")
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.clients[slug]; exists {
-		return false
+	if _, exists := r.slugIndex[newKey]; exists && newKey != oldKey {
+		return fmt.Errorf("someone already uses this subdomain")
+	}
+	client, ok := r.byUser[user][oldKey]
+	if !ok {
+		return fmt.Errorf("session not found")
 	}
 
-	r.clients[slug] = session
-	return true
+	delete(r.byUser[user], oldKey)
+	delete(r.slugIndex, oldKey)
+
+	client.slugManager.Set(newKey.Id)
+	r.slugIndex[newKey] = user
+
+	if r.byUser[user] == nil {
+		r.byUser[user] = make(map[Key]*SSHSession)
+	}
+	r.byUser[user][newKey] = client
+	return nil
 }
 
-func (r *registry) Remove(slug string) {
+func (r *registry) Register(key Key, session *SSHSession) (success bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	delete(r.clients, slug)
+	if _, exists := r.slugIndex[key]; exists {
+		return false
+	}
+
+	userID := session.lifecycle.GetUser()
+	if r.byUser[userID] == nil {
+		r.byUser[userID] = make(map[Key]*SSHSession)
+	}
+
+	r.byUser[userID][key] = session
+	r.slugIndex[key] = userID
+	return true
 }
+
+func (r *registry) GetAllSessionFromUser(user string) []*SSHSession {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	m := r.byUser[user]
+	if len(m) == 0 {
+		return []*SSHSession{}
+	}
+
+	sessions := make([]*SSHSession, 0, len(m))
+	for _, s := range m {
+		sessions = append(sessions, s)
+	}
+	return sessions
+}
+
+func (r *registry) Remove(key Key) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	userID, ok := r.slugIndex[key]
+	if !ok {
+		return
+	}
+
+	delete(r.byUser[userID], key)
+	if len(r.byUser[userID]) == 0 {
+		delete(r.byUser, userID)
+	}
+	delete(r.slugIndex, key)
+}
+
+func isValidSlug(slug string) bool {
+	if len(slug) < minSlugLength || len(slug) > maxSlugLength {
+		return false
+	}
+
+	if slug[0] == '-' || slug[len(slug)-1] == '-' {
+		return false
+	}
+
+	for _, c := range slug {
+		if !isValidSlugChar(byte(c)) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func isValidSlugChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'
+}
+
+func isForbiddenSlug(slug string) bool {
+	_, ok := forbiddenSlugs[slug]
+	return ok
+}
+
+var forbiddenSlugs = map[string]struct{}{
+	"ping":          {},
+	"staging":       {},
+	"admin":         {},
+	"root":          {},
+	"api":           {},
+	"www":           {},
+	"support":       {},
+	"help":          {},
+	"status":        {},
+	"health":        {},
+	"login":         {},
+	"logout":        {},
+	"signup":        {},
+	"register":      {},
+	"settings":      {},
+	"config":        {},
+	"null":          {},
+	"undefined":     {},
+	"example":       {},
+	"test":          {},
+	"dev":           {},
+	"system":        {},
+	"administrator": {},
+	"dashboard":     {},
+	"account":       {},
+	"profile":       {},
+	"user":          {},
+	"users":         {},
+	"auth":          {},
+	"oauth":         {},
+	"callback":      {},
+	"webhook":       {},
+	"webhooks":      {},
+	"static":        {},
+	"assets":        {},
+	"cdn":           {},
+	"mail":          {},
+	"email":         {},
+	"ftp":           {},
+	"ssh":           {},
+	"git":           {},
+	"svn":           {},
+	"blog":          {},
+	"news":          {},
+	"about":         {},
+	"contact":       {},
+	"terms":         {},
+	"privacy":       {},
+	"legal":         {},
+	"billing":       {},
+	"payment":       {},
+	"checkout":      {},
+	"cart":          {},
+	"shop":          {},
+	"store":         {},
+	"download":      {},
+	"uploads":       {},
+	"images":        {},
+	"img":           {},
+	"css":           {},
+	"js":            {},
+	"fonts":         {},
+	"public":        {},
+	"private":       {},
+	"internal":      {},
+	"external":      {},
+	"proxy":         {},
+	"cache":         {},
+	"debug":         {},
+	"metrics":       {},
+	"monitoring":    {},
+	"graphql":       {},
+	"rest":          {},
+	"rpc":           {},
+	"socket":        {},
+	"ws":            {},
+	"wss":           {},
+	"app":           {},
+	"apps":          {},
+	"mobile":        {},
+	"desktop":       {},
+	"embed":         {},
+	"widget":        {},
+	"docs":          {},
+	"documentation": {},
+	"wiki":          {},
+	"forum":         {},
+	"community":     {},
+	"feedback":      {},
+	"report":        {},
+	"abuse":         {},
+	"spam":          {},
+	"security":      {},
+	"verify":        {},
+	"confirm":       {},
+	"reset":         {},
+	"password":      {},
+	"recovery":      {},
+	"unsubscribe":   {},
+	"subscribe":     {},
+	"notifications": {},
+	"alerts":        {},
+	"messages":      {},
+	"inbox":         {},
+	"outbox":        {},
+	"sent":          {},
+	"draft":         {},
+	"trash":         {},
+	"archive":       {},
+	"search":        {},
+	"explore":       {},
+	"discover":      {},
+	"trending":      {},
+	"popular":       {},
+	"featured":      {},
+	"new":           {},
+	"latest":        {},
+	"top":           {},
+	"best":          {},
+	"hot":           {},
+	"random":        {},
+	"all":           {},
+	"any":           {},
+	"none":          {},
+	"true":          {},
+	"false":         {},
+}
+
+var (
+	minSlugLength = 3
+	maxSlugLength = 20
+)

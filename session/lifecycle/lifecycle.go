@@ -4,6 +4,8 @@ import (
 	"errors"
 	"io"
 	"net"
+	"time"
+
 	portUtil "tunnel_pls/internal/port"
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
@@ -17,28 +19,36 @@ type Forwarder interface {
 	GetForwardedPort() uint16
 }
 
-type Lifecycle struct {
-	status           types.Status
-	conn             ssh.Conn
-	channel          ssh.Channel
-	forwarder        Forwarder
-	slugManager      slug.Manager
-	unregisterClient func(slug string)
+type SessionRegistry interface {
+	Remove(key types.SessionKey)
 }
 
-func NewLifecycle(conn ssh.Conn, forwarder Forwarder, slugManager slug.Manager) *Lifecycle {
+type Lifecycle struct {
+	status          types.Status
+	conn            ssh.Conn
+	channel         ssh.Channel
+	forwarder       Forwarder
+	sessionRegistry SessionRegistry
+	slugManager     slug.Manager
+	startedAt       time.Time
+	user            string
+}
+
+func NewLifecycle(conn ssh.Conn, forwarder Forwarder, slugManager slug.Manager, user string) *Lifecycle {
 	return &Lifecycle{
-		status:           "",
-		conn:             conn,
-		channel:          nil,
-		forwarder:        forwarder,
-		slugManager:      slugManager,
-		unregisterClient: nil,
+		status:          types.INITIALIZING,
+		conn:            conn,
+		channel:         nil,
+		forwarder:       forwarder,
+		slugManager:     slugManager,
+		sessionRegistry: nil,
+		startedAt:       time.Now(),
+		user:            user,
 	}
 }
 
-func (l *Lifecycle) SetUnregisterClient(unregisterClient func(slug string)) {
-	l.unregisterClient = unregisterClient
+func (l *Lifecycle) SetSessionRegistry(registry SessionRegistry) {
+	l.sessionRegistry = registry
 }
 
 type SessionLifecycle interface {
@@ -46,8 +56,15 @@ type SessionLifecycle interface {
 	SetStatus(status types.Status)
 	GetConnection() ssh.Conn
 	GetChannel() ssh.Channel
+	GetUser() string
 	SetChannel(channel ssh.Channel)
-	SetUnregisterClient(unregisterClient func(slug string))
+	SetSessionRegistry(registry SessionRegistry)
+	IsActive() bool
+	StartedAt() time.Time
+}
+
+func (l *Lifecycle) GetUser() string {
+	return l.user
 }
 
 func (l *Lifecycle) GetChannel() ssh.Channel {
@@ -62,6 +79,9 @@ func (l *Lifecycle) GetConnection() ssh.Conn {
 }
 func (l *Lifecycle) SetStatus(status types.Status) {
 	l.status = status
+	if status == types.RUNNING && l.startedAt.IsZero() {
+		l.startedAt = time.Now()
+	}
 }
 
 func (l *Lifecycle) Close() error {
@@ -85,16 +105,25 @@ func (l *Lifecycle) Close() error {
 	}
 
 	clientSlug := l.slugManager.Get()
-	if clientSlug != "" {
-		l.unregisterClient(clientSlug)
+	if clientSlug != "" && l.sessionRegistry.Remove != nil {
+		key := types.SessionKey{Id: clientSlug, Type: l.forwarder.GetTunnelType()}
+		l.sessionRegistry.Remove(key)
 	}
 
 	if l.forwarder.GetTunnelType() == types.TCP {
-		err := portUtil.Default.SetPortStatus(l.forwarder.GetForwardedPort(), false)
+		err = portUtil.Default.SetPortStatus(l.forwarder.GetForwardedPort(), false)
 		if err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func (l *Lifecycle) IsActive() bool {
+	return l.status == types.RUNNING
+}
+
+func (l *Lifecycle) StartedAt() time.Time {
+	return l.startedAt
 }
