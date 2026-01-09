@@ -11,9 +11,15 @@ const (
 type TunnelType string
 
 const (
-	HTTP TunnelType = "HTTP"
-	TCP  TunnelType = "TCP"
+	UNKNOWN TunnelType = "UNKNOWN"
+	HTTP    TunnelType = "HTTP"
+	TCP     TunnelType = "TCP"
 )
+
+type SessionKey struct {
+	Id   string
+	Type TunnelType
+}
 
 var BadGatewayResponse = []byte("HTTP/1.1 502 Bad Gateway\r\n" +
 	"Content-Length: 11\r\n" +

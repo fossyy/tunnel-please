@@ -164,8 +164,9 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 
 func (s *SSHSession) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 	slug := random.GenerateRandomString(20)
+	key := types.SessionKey{Id: slug, Type: types.HTTP}
 
-	if !s.registry.Register(slug, s) {
+	if !s.registry.Register(key, s) {
 		log.Printf("Failed to register client with slug: %s", slug)
 		err := req.Reply(false, nil)
 		if err != nil {
@@ -178,7 +179,7 @@ func (s *SSHSession) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 	err := binary.Write(buf, binary.BigEndian, uint32(portToBind))
 	if err != nil {
 		log.Println("Failed to write port to buffer:", err)
-		s.registry.Remove(slug)
+		s.registry.Remove(key)
 		err = req.Reply(false, nil)
 		if err != nil {
 			log.Println("Failed to reply to request:", err)
@@ -190,7 +191,7 @@ func (s *SSHSession) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 	err = req.Reply(true, buf.Bytes())
 	if err != nil {
 		log.Println("Failed to reply to request:", err)
-		s.registry.Remove(slug)
+		s.registry.Remove(key)
 		err = req.Reply(false, nil)
 		if err != nil {
 			log.Println("Failed to reply to request:", err)
@@ -225,10 +226,29 @@ func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind 
 		return
 	}
 
+	key := types.SessionKey{Id: fmt.Sprintf("%d", portToBind), Type: types.TCP}
+
+	if !s.registry.Register(key, s) {
+		log.Printf("Failed to register TCP client with id: %s", key.Id)
+		if setErr := portUtil.Default.SetPortStatus(portToBind, false); setErr != nil {
+			log.Printf("Failed to reset port status: %v", setErr)
+		}
+		if closeErr := listener.Close(); closeErr != nil {
+			log.Printf("Failed to close listener: %s", closeErr)
+		}
+		err = req.Reply(false, nil)
+		if err != nil {
+			log.Println("Failed to reply to request:", err)
+		}
+		_ = s.lifecycle.Close()
+		return
+	}
+
 	buf := new(bytes.Buffer)
 	err = binary.Write(buf, binary.BigEndian, uint32(portToBind))
 	if err != nil {
 		log.Println("Failed to write port to buffer:", err)
+		s.registry.Remove(key)
 		if setErr := portUtil.Default.SetPortStatus(portToBind, false); setErr != nil {
 			log.Printf("Failed to reset port status: %v", setErr)
 		}
@@ -244,6 +264,7 @@ func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind 
 	err = req.Reply(true, buf.Bytes())
 	if err != nil {
 		log.Println("Failed to reply to request:", err)
+		s.registry.Remove(key)
 		if setErr := portUtil.Default.SetPortStatus(portToBind, false); setErr != nil {
 			log.Printf("Failed to reset port status: %v", setErr)
 		}
@@ -258,6 +279,7 @@ func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind 
 	s.forwarder.SetType(types.TCP)
 	s.forwarder.SetListener(listener)
 	s.forwarder.SetForwardedPort(portToBind)
+	s.slugManager.Set(key.Id)
 	s.lifecycle.SetStatus(types.RUNNING)
 	go s.forwarder.AcceptTCPConnections()
 	s.interaction.Start()

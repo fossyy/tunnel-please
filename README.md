@@ -33,6 +33,10 @@ The following environment variables can be configured in the `.env` file:
 | `BUFFER_SIZE` | Buffer size for io.Copy operations in bytes (4096-1048576) | `32768` | No |
 | `PPROF_ENABLED` | Enable pprof profiling server | `false` | No |
 | `PPROF_PORT` | Port for pprof server | `6060` | No |
+| `MODE` | Runtime mode: `standalone` (default, no gRPC/auth) or `node` (enable gRPC + auth) | `standalone` | No |
+| `GRPC_ADDRESS` | gRPC server address/host used in `node` mode | `localhost` | No |
+| `GRPC_PORT` | gRPC server port used in `node` mode | `8080` | No |
+| `NODE_TOKEN` | Authentication token sent to controller in `node` mode | - (required in `node`) | Yes (node mode) |
 
 **Note:** All environment variables now use UPPERCASE naming. The application includes sensible defaults for all variables, so you can run it without a `.env` file for basic functionality.
 

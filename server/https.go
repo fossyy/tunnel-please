@@ -9,6 +9,7 @@ import (
 	"net"
 	"strings"
 	"tunnel_pls/internal/config"
+	"tunnel_pls/types"
 )
 
 func (hs *httpServer) ListenAndServeTLS() error {
@@ -89,8 +90,11 @@ func (hs *httpServer) handlerTLS(conn net.Conn) {
 		return
 	}
 
-	sshSession, exist := hs.sessionRegistry.Get(slug)
-	if !exist {
+	sshSession, err := hs.sessionRegistry.Get(types.SessionKey{
+		Id:   slug,
+		Type: types.HTTP,
+	})
+	if err != nil {
 		_, err = conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
 			fmt.Sprintf("Location: https://tunnl.live/tunnel-not-found?slug=%s\r\n", slug) +
 			"Content-Length: 0\r\n" +
