@@ -37,6 +37,9 @@ type Controller interface {
 	SetWH(w, h int)
 	Redraw()
 	SetSessionRegistry(registry SessionRegistry)
+	SetMode(m types.Mode)
+	GetMode() types.Mode
+	Send(message string) error
 }
 
 type Forwarder interface {
@@ -54,8 +57,24 @@ type Interaction struct {
 	program         *tea.Program
 	ctx             context.Context
 	cancel          context.CancelFunc
+	mode            types.Mode
 }
 
+func (i *Interaction) SetMode(m types.Mode) {
+	i.mode = m
+}
+
+func (i *Interaction) GetMode() types.Mode {
+	return i.mode
+}
+
+func (i *Interaction) Send(message string) error {
+	if i.channel != nil {
+		_, err := i.channel.Write([]byte(message))
+		return err
+	}
+	return nil
+}
 func (i *Interaction) SetWH(w, h int) {
 	if i.program != nil {
 		i.program.Send(tea.WindowSizeMsg{
@@ -749,6 +768,9 @@ func (m *model) View() string {
 }
 
 func (i *Interaction) Start() {
+	if i.mode == types.HEADLESS {
+		return
+	}
 	lipgloss.SetColorProfile(termenv.TrueColor)
 
 	domain := config.Getenv("DOMAIN", "localhost")
