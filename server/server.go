@@ -90,7 +90,6 @@ func (s *Server) handleConnection(conn net.Conn) {
 		user = u
 		cancel()
 	}
-
 	log.Println("SSH connection established:", sshConn.User())
 	sshSession := session.New(sshConn, forwardingReqs, chans, s.sessionRegistry, user)
 	err = sshSession.Start()

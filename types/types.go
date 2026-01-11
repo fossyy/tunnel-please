@@ -8,6 +8,13 @@ const (
 	SETUP        Status = "SETUP"
 )
 
+type Mode string
+
+const (
+	INTERACTIVE Mode = "INTERACTIVE"
+	HEADLESS    Mode = "HEADLESS"
+)
+
 type TunnelType string
 
 const (

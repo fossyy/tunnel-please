@@ -165,7 +165,6 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 func (s *SSHSession) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 	slug := random.GenerateRandomString(20)
 	key := types.SessionKey{Id: slug, Type: types.HTTP}
-
 	if !s.registry.Register(key, s) {
 		log.Printf("Failed to register client with slug: %s", slug)
 		err := req.Reply(false, nil)
@@ -203,7 +202,6 @@ func (s *SSHSession) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 	s.forwarder.SetForwardedPort(portToBind)
 	s.slugManager.Set(slug)
 	s.lifecycle.SetStatus(types.RUNNING)
-	s.interaction.Start()
 }
 
 func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind uint16) {
@@ -282,7 +280,6 @@ func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind 
 	s.slugManager.Set(key.Id)
 	s.lifecycle.SetStatus(types.RUNNING)
 	go s.forwarder.AcceptTCPConnections()
-	s.interaction.Start()
 }
 
 func readSSHString(reader *bytes.Reader) (string, error) {
