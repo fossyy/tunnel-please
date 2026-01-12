@@ -122,7 +122,7 @@ func (s *SSHSession) Start() error {
 		return fmt.Errorf("no forwarding Request")
 	}
 
-	if (s.interaction.GetMode() == types.HEADLESS && config.Getenv("MODE", "standalone") == "standalone") || s.lifecycle.GetUser() == "UNAUTHORIZED" {
+	if (s.interaction.GetMode() == types.HEADLESS && config.Getenv("MODE", "standalone") == "standalone") && s.lifecycle.GetUser() == "UNAUTHORIZED" {
 		if err := tcpipReq.Reply(false, nil); err != nil {
 			log.Printf("cannot reply to tcpip req: %s\n", err)
 			return err
