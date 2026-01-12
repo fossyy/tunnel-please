@@ -183,13 +183,8 @@ func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind 
 		portToBind = unassigned
 	}
 
-	if isUsed, exists := portUtil.Default.GetPortStatus(portToBind); exists && isUsed {
+	if claimed := portUtil.Default.ClaimPort(portToBind); !claimed {
 		fail(fmt.Sprintf("Port %d is already in use or restricted", portToBind))
-		return
-	}
-
-	if err := portUtil.Default.SetPortStatus(portToBind, true); err != nil {
-		fail(fmt.Sprintf("Failed to set port status: %v", err))
 		return
 	}
 
