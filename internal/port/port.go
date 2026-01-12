@@ -74,7 +74,6 @@ func (pm *manager) GetUnassignedPort() (uint16, bool) {
 
 	for _, port := range pm.sortedPorts {
 		if !pm.ports[port] {
-			pm.ports[port] = true
 			return port, true
 		}
 	}
