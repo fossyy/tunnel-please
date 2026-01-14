@@ -13,6 +13,7 @@ import (
 	"time"
 	"tunnel_pls/internal/config"
 	"tunnel_pls/session"
+	"tunnel_pls/types"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -313,8 +314,11 @@ func (hs *httpServer) handler(conn net.Conn) {
 		return
 	}
 
-	sshSession, exist := hs.sessionRegistry.Get(slug)
-	if !exist {
+	sshSession, err := hs.sessionRegistry.Get(types.SessionKey{
+		Id:   slug,
+		Type: types.HTTP,
+	})
+	if err != nil {
 		_, err = conn.Write([]byte("HTTP/1.1 301 Moved Permanently\r\n" +
 			fmt.Sprintf("Location: https://tunnl.live/tunnel-not-found?slug=%s\r\n", slug) +
 			"Content-Length: 0\r\n" +
@@ -331,8 +335,8 @@ func (hs *httpServer) handler(conn net.Conn) {
 	return
 }
 
-func forwardRequest(cw HTTPWriter, initialRequest RequestHeaderManager, sshSession *session.SSHSession) {
-	payload := sshSession.GetForwarder().CreateForwardedTCPIPPayload(cw.GetRemoteAddr())
+func forwardRequest(cw HTTPWriter, initialRequest RequestHeaderManager, sshSession session.Session) {
+	payload := sshSession.Forwarder().CreateForwardedTCPIPPayload(cw.GetRemoteAddr())
 
 	type channelResult struct {
 		channel ssh.Channel
@@ -342,7 +346,7 @@ func forwardRequest(cw HTTPWriter, initialRequest RequestHeaderManager, sshSessi
 	resultChan := make(chan channelResult, 1)
 
 	go func() {
-		channel, reqs, err := sshSession.GetLifecycle().GetConnection().OpenChannel("forwarded-tcpip", payload)
+		channel, reqs, err := sshSession.Lifecycle().Connection().OpenChannel("forwarded-tcpip", payload)
 		resultChan <- channelResult{channel, reqs, err}
 	}()
 
@@ -353,14 +357,14 @@ func forwardRequest(cw HTTPWriter, initialRequest RequestHeaderManager, sshSessi
 	case result := <-resultChan:
 		if result.err != nil {
 			log.Printf("Failed to open forwarded-tcpip channel: %v", result.err)
-			sshSession.GetForwarder().WriteBadGatewayResponse(cw.GetWriter())
+			sshSession.Forwarder().WriteBadGatewayResponse(cw.GetWriter())
 			return
 		}
 		channel = result.channel
 		reqs = result.reqs
 	case <-time.After(5 * time.Second):
 		log.Printf("Timeout opening forwarded-tcpip channel")
-		sshSession.GetForwarder().WriteBadGatewayResponse(cw.GetWriter())
+		sshSession.Forwarder().WriteBadGatewayResponse(cw.GetWriter())
 		return
 	}
 
@@ -386,6 +390,6 @@ func forwardRequest(cw HTTPWriter, initialRequest RequestHeaderManager, sshSessi
 		return
 	}
 
-	sshSession.GetForwarder().HandleConnection(cw, channel, cw.GetRemoteAddr())
+	sshSession.Forwarder().HandleConnection(cw, channel, cw.GetRemoteAddr())
 	return
 }

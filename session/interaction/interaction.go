@@ -23,34 +23,59 @@ import (
 
 type Lifecycle interface {
 	Close() error
+	User() string
 }
 
-type Controller interface {
+type SessionRegistry interface {
+	Update(user string, oldKey, newKey types.SessionKey) error
+}
+
+type Interaction interface {
+	Mode() types.Mode
 	SetChannel(channel ssh.Channel)
 	SetLifecycle(lifecycle Lifecycle)
-	SetSlugModificator(func(oldSlug, newSlug string) bool)
-	Start()
+	SetSessionRegistry(registry SessionRegistry)
+	SetMode(m types.Mode)
 	SetWH(w, h int)
+	Start()
+	Redraw()
+	Send(message string) error
 }
 
 type Forwarder interface {
 	Close() error
-	GetTunnelType() types.TunnelType
-	GetForwardedPort() uint16
+	TunnelType() types.TunnelType
+	ForwardedPort() uint16
 }
 
-type Interaction struct {
-	channel          ssh.Channel
-	slugManager      slug.Manager
-	forwarder        Forwarder
-	lifecycle        Lifecycle
-	updateClientSlug func(oldSlug, newSlug string) bool
-	program          *tea.Program
-	ctx              context.Context
-	cancel           context.CancelFunc
+type interaction struct {
+	channel         ssh.Channel
+	slug            slug.Slug
+	forwarder       Forwarder
+	lifecycle       Lifecycle
+	sessionRegistry SessionRegistry
+	program         *tea.Program
+	ctx             context.Context
+	cancel          context.CancelFunc
+	mode            types.Mode
 }
 
-func (i *Interaction) SetWH(w, h int) {
+func (i *interaction) SetMode(m types.Mode) {
+	i.mode = m
+}
+
+func (i *interaction) Mode() types.Mode {
+	return i.mode
+}
+
+func (i *interaction) Send(message string) error {
+	if i.channel != nil {
+		_, err := i.channel.Write([]byte(message))
+		return err
+	}
+	return nil
+}
+func (i *interaction) SetWH(w, h int) {
 	if i.program != nil {
 		i.program.Send(tea.WindowSizeMsg{
 			Width:  w,
@@ -65,7 +90,6 @@ type commandItem struct {
 }
 
 type model struct {
-	tunnelURL         string
 	domain            string
 	protocol          string
 	tunnelType        types.TunnelType
@@ -79,9 +103,16 @@ type model struct {
 	commandList       list.Model
 	slugInput         textinput.Model
 	slugError         string
-	interaction       *Interaction
+	interaction       *interaction
 	width             int
 	height            int
+}
+
+func (m *model) getTunnelURL() string {
+	if m.tunnelType == types.HTTP {
+		return buildURL(m.protocol, m.interaction.slug.String(), m.domain)
+	}
+	return fmt.Sprintf("tcp://%s:%d", m.domain, m.port)
 }
 
 type keymap struct {
@@ -92,33 +123,33 @@ type keymap struct {
 
 type tickMsg time.Time
 
-func NewInteraction(slugManager slug.Manager, forwarder Forwarder) *Interaction {
+func New(slug slug.Slug, forwarder Forwarder) Interaction {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Interaction{
-		channel:          nil,
-		slugManager:      slugManager,
-		forwarder:        forwarder,
-		lifecycle:        nil,
-		updateClientSlug: nil,
-		program:          nil,
-		ctx:              ctx,
-		cancel:           cancel,
+	return &interaction{
+		channel:         nil,
+		slug:            slug,
+		forwarder:       forwarder,
+		lifecycle:       nil,
+		sessionRegistry: nil,
+		program:         nil,
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 }
 
-func (i *Interaction) SetLifecycle(lifecycle Lifecycle) {
+func (i *interaction) SetSessionRegistry(registry SessionRegistry) {
+	i.sessionRegistry = registry
+}
+
+func (i *interaction) SetLifecycle(lifecycle Lifecycle) {
 	i.lifecycle = lifecycle
 }
 
-func (i *Interaction) SetChannel(channel ssh.Channel) {
+func (i *interaction) SetChannel(channel ssh.Channel) {
 	i.channel = channel
 }
 
-func (i *Interaction) SetSlugModificator(modificator func(oldSlug, newSlug string) (success bool)) {
-	i.updateClientSlug = modificator
-}
-
-func (i *Interaction) Stop() {
+func (i *interaction) Stop() {
 	if i.cancel != nil {
 		i.cancel()
 	}
@@ -163,11 +194,11 @@ func tickCmd(d time.Duration) tea.Cmd {
 	})
 }
 
-func (m model) Init() tea.Cmd {
+func (m *model) Init() tea.Cmd {
 	return tea.Batch(textinput.Blink, tea.WindowSize())
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
@@ -211,21 +242,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(tea.ClearScreen, textinput.Blink)
 			case "enter":
 				inputValue := m.slugInput.Value()
-
-				if isForbiddenSlug(inputValue) {
-					m.slugError = "This subdomain is reserved. Please choose a different one."
-					return m, nil
-				} else if !isValidSlug(inputValue) {
-					m.slugError = "Invalid subdomain. Follow the rules."
-					return m, nil
-				}
-
-				if !m.interaction.updateClientSlug(m.interaction.slugManager.Get(), inputValue) {
-					m.slugError = "Someone already uses this subdomain."
+				if err := m.interaction.sessionRegistry.Update(m.interaction.lifecycle.User(), types.SessionKey{
+					Id:   m.interaction.slug.String(),
+					Type: types.HTTP,
+				}, types.SessionKey{
+					Id:   inputValue,
+					Type: types.HTTP,
+				}); err != nil {
+					m.slugError = err.Error()
 					return m, nil
 				}
-
-				m.tunnelURL = buildURL(m.protocol, inputValue, m.domain)
 				m.editingSlug = false
 				m.slugError = ""
 				return m, tea.Batch(tea.ClearScreen, textinput.Blink)
@@ -259,7 +285,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if item.name == "slug" {
 						m.showingCommands = false
 						m.editingSlug = true
-						m.slugInput.SetValue(m.interaction.slugManager.Get())
+						m.slugInput.SetValue(m.interaction.slug.String())
 						m.slugInput.Focus()
 						return m, tea.Batch(tea.ClearScreen, textinput.Blink)
 					} else if item.name == "tunnel-type" {
@@ -291,14 +317,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) helpView() string {
+func (i *interaction) Redraw() {
+	if i.program != nil {
+		i.program.Send(tea.ClearScreen())
+	}
+}
+
+func (m *model) helpView() string {
 	return "\n" + m.help.ShortHelpView([]key.Binding{
 		m.keymap.command,
 		m.keymap.quit,
 	})
 }
 
-func (m model) View() string {
+func (m *model) View() string {
 	if m.quitting {
 		return ""
 	}
@@ -659,22 +691,32 @@ func (m model) View() string {
 		MarginBottom(boxMargin).
 		Width(boxMaxWidth)
 
-	urlDisplay := m.tunnelURL
-	if shouldUseCompactLayout(m.width, 80) && len(m.tunnelURL) > m.width-20 {
-		maxLen := m.width - 25
-		if maxLen > 10 {
-			urlDisplay = truncateString(m.tunnelURL, maxLen)
-		}
-	}
+	authenticatedUser := m.interaction.lifecycle.User()
+
+	userInfoStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Bold(true)
+
+	sectionHeaderStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#888888")).
+		Bold(true)
+
+	addressStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FAFAFA"))
 
 	var infoContent string
 	if shouldUseCompactLayout(m.width, 70) {
-		infoContent = fmt.Sprintf("🌐 %s", urlBoxStyle.Render(urlDisplay))
-	} else if isCompact {
-		infoContent = fmt.Sprintf("🌐  Forwarding to:\n\n     %s", urlBoxStyle.Render(urlDisplay))
+		infoContent = fmt.Sprintf("👤 %s\n\n%s\n%s",
+			userInfoStyle.Render(authenticatedUser),
+			sectionHeaderStyle.Render("🌐 FORWARDING ADDRESS:"),
+			addressStyle.Render(fmt.Sprintf("   %s", urlBoxStyle.Render(m.getTunnelURL()))))
 	} else {
-		infoContent = fmt.Sprintf("🌐  F O R W A R D I N G   T O:\n\n     %s", urlBoxStyle.Render(urlDisplay))
+		infoContent = fmt.Sprintf("👤  Authenticated as: %s\n\n%s\n     %s",
+			userInfoStyle.Render(authenticatedUser),
+			sectionHeaderStyle.Render("🌐  FORWARDING ADDRESS:"),
+			addressStyle.Render(urlBoxStyle.Render(m.getTunnelURL())))
 	}
+
 	b.WriteString(responsiveInfoBox.Render(infoContent))
 	b.WriteString("\n")
 
@@ -725,7 +767,10 @@ func (m model) View() string {
 	return b.String()
 }
 
-func (i *Interaction) Start() {
+func (i *interaction) Start() {
+	if i.mode == types.HEADLESS {
+		return
+	}
 	lipgloss.SetColorProfile(termenv.TrueColor)
 
 	domain := config.Getenv("DOMAIN", "localhost")
@@ -734,15 +779,8 @@ func (i *Interaction) Start() {
 		protocol = "https"
 	}
 
-	tunnelType := i.forwarder.GetTunnelType()
-	port := i.forwarder.GetForwardedPort()
-
-	var tunnelURL string
-	if tunnelType == types.HTTP {
-		tunnelURL = buildURL(protocol, i.slugManager.Get(), domain)
-	} else {
-		tunnelURL = fmt.Sprintf("tcp://%s:%d", domain, port)
-	}
+	tunnelType := i.forwarder.TunnelType()
+	port := i.forwarder.ForwardedPort()
 
 	items := []list.Item{
 		commandItem{name: "slug", desc: "Set custom subdomain"},
@@ -764,8 +802,7 @@ func (i *Interaction) Start() {
 	ti.CharLimit = 20
 	ti.Width = 50
 
-	m := model{
-		tunnelURL:   tunnelURL,
+	m := &model{
 		domain:      domain,
 		protocol:    protocol,
 		tunnelType:  tunnelType,
@@ -818,31 +855,4 @@ func buildURL(protocol, subdomain, domain string) string {
 
 func generateRandomSubdomain() string {
 	return random.GenerateRandomString(20)
-}
-
-func isValidSlug(slug string) bool {
-	if len(slug) < minSlugLength || len(slug) > maxSlugLength {
-		return false
-	}
-
-	if slug[0] == '-' || slug[len(slug)-1] == '-' {
-		return false
-	}
-
-	for _, c := range slug {
-		if !isValidSlugChar(byte(c)) {
-			return false
-		}
-	}
-
-	return true
-}
-
-func isValidSlugChar(c byte) bool {
-	return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'
-}
-
-func isForbiddenSlug(slug string) bool {
-	_, ok := forbiddenSlugs[slug]
-	return ok
 }

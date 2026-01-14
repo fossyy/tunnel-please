@@ -1,19 +1,31 @@
 package types
 
-type Status string
+type Status int
 
 const (
-	INITIALIZING Status = "INITIALIZING"
-	RUNNING      Status = "RUNNING"
-	SETUP        Status = "SETUP"
+	INITIALIZING Status = iota
+	RUNNING
 )
 
-type TunnelType string
+type Mode int
 
 const (
-	HTTP TunnelType = "HTTP"
-	TCP  TunnelType = "TCP"
+	INTERACTIVE Mode = iota
+	HEADLESS
 )
+
+type TunnelType int
+
+const (
+	UNKNOWN TunnelType = iota
+	HTTP
+	TCP
+)
+
+type SessionKey struct {
+	Id   string
+	Type TunnelType
+}
 
 var BadGatewayResponse = []byte("HTTP/1.1 502 Bad Gateway\r\n" +
 	"Content-Length: 11\r\n" +

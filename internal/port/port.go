@@ -13,7 +13,7 @@ type Manager interface {
 	AddPortRange(startPort, endPort uint16) error
 	GetUnassignedPort() (uint16, bool)
 	SetPortStatus(port uint16, assigned bool) error
-	GetPortStatus(port uint16) (bool, bool)
+	ClaimPort(port uint16) (claimed bool)
 }
 
 type manager struct {
@@ -74,7 +74,6 @@ func (pm *manager) GetUnassignedPort() (uint16, bool) {
 
 	for _, port := range pm.sortedPorts {
 		if !pm.ports[port] {
-			pm.ports[port] = true
 			return port, true
 		}
 	}
@@ -89,10 +88,21 @@ func (pm *manager) SetPortStatus(port uint16, assigned bool) error {
 	return nil
 }
 
-func (pm *manager) GetPortStatus(port uint16) (bool, bool) {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
+func (pm *manager) ClaimPort(port uint16) (claimed bool) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 
 	status, exists := pm.ports[port]
-	return status, exists
+
+	if exists && status {
+		return false
+	}
+
+	if !exists {
+		pm.ports[port] = true
+		return true
+	}
+
+	pm.ports[port] = true
+	return true
 }
