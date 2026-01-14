@@ -1,24 +1,24 @@
 package slug
 
-type Manager interface {
-	Get() string
+type Slug interface {
+	String() string
 	Set(slug string)
 }
 
-type manager struct {
+type slug struct {
 	slug string
 }
 
-func NewManager() Manager {
-	return &manager{
+func New() Slug {
+	return &slug{
 		slug: "",
 	}
 }
 
-func (s *manager) Get() string {
+func (s *slug) String() string {
 	return s.slug
 }
 
-func (s *manager) Set(slug string) {
+func (s *slug) Set(slug string) {
 	s.slug = slug
 }

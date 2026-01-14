@@ -263,7 +263,7 @@ func (c *Client) handleSlugChange(subscribe grpc.BidiStreamingClient[proto.Node,
 		}, "slug change failure response")
 	}
 
-	userSession.GetInteraction().Redraw()
+	userSession.Interaction().Redraw()
 	return c.sendNode(subscribe, &proto.Node{
 		Type: proto.EventType_SLUG_CHANGE_RESPONSE,
 		Payload: &proto.Node_SlugEventResponse{
@@ -321,7 +321,7 @@ func (c *Client) handleTerminateSession(subscribe grpc.BidiStreamingClient[proto
 		}, "terminate session fetch failed")
 	}
 
-	if err = userSession.GetLifecycle().Close(); err != nil {
+	if err = userSession.Lifecycle().Close(); err != nil {
 		return c.sendNode(subscribe, &proto.Node{
 			Type: proto.EventType_TERMINATE_SESSION,
 			Payload: &proto.Node_TerminateSessionEventResponse{
