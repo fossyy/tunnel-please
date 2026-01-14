@@ -1,26 +1,25 @@
 package types
 
-type Status string
+type Status int
 
 const (
-	INITIALIZING Status = "INITIALIZING"
-	RUNNING      Status = "RUNNING"
-	SETUP        Status = "SETUP"
+	INITIALIZING Status = iota
+	RUNNING
 )
 
-type Mode string
+type Mode int
 
 const (
-	INTERACTIVE Mode = "INTERACTIVE"
-	HEADLESS    Mode = "HEADLESS"
+	INTERACTIVE Mode = iota
+	HEADLESS
 )
 
-type TunnelType string
+type TunnelType int
 
 const (
-	UNKNOWN TunnelType = "UNKNOWN"
-	HTTP    TunnelType = "HTTP"
-	TCP     TunnelType = "TCP"
+	UNKNOWN TunnelType = iota
+	HTTP
+	TCP
 )
 
 type SessionKey struct {

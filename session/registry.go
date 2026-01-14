@@ -9,27 +9,27 @@ import (
 type Key = types.SessionKey
 
 type Registry interface {
-	Get(key Key) (session *SSHSession, err error)
-	GetWithUser(user string, key Key) (session *SSHSession, err error)
+	Get(key Key) (session Session, err error)
+	GetWithUser(user string, key Key) (session Session, err error)
 	Update(user string, oldKey, newKey Key) error
-	Register(key Key, session *SSHSession) (success bool)
+	Register(key Key, session Session) (success bool)
 	Remove(key Key)
-	GetAllSessionFromUser(user string) []*SSHSession
+	GetAllSessionFromUser(user string) []Session
 }
 type registry struct {
 	mu        sync.RWMutex
-	byUser    map[string]map[Key]*SSHSession
+	byUser    map[string]map[Key]Session
 	slugIndex map[Key]string
 }
 
 func NewRegistry() Registry {
 	return &registry{
-		byUser:    make(map[string]map[Key]*SSHSession),
+		byUser:    make(map[string]map[Key]Session),
 		slugIndex: make(map[Key]string),
 	}
 }
 
-func (r *registry) Get(key Key) (session *SSHSession, err error) {
+func (r *registry) Get(key Key) (session Session, err error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -45,7 +45,7 @@ func (r *registry) Get(key Key) (session *SSHSession, err error) {
 	return client, nil
 }
 
-func (r *registry) GetWithUser(user string, key Key) (session *SSHSession, err error) {
+func (r *registry) GetWithUser(user string, key Key) (session Session, err error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -87,17 +87,17 @@ func (r *registry) Update(user string, oldKey, newKey Key) error {
 	delete(r.byUser[user], oldKey)
 	delete(r.slugIndex, oldKey)
 
-	client.slugManager.Set(newKey.Id)
+	client.Slug().Set(newKey.Id)
 	r.slugIndex[newKey] = user
 
 	if r.byUser[user] == nil {
-		r.byUser[user] = make(map[Key]*SSHSession)
+		r.byUser[user] = make(map[Key]Session)
 	}
 	r.byUser[user][newKey] = client
 	return nil
 }
 
-func (r *registry) Register(key Key, session *SSHSession) (success bool) {
+func (r *registry) Register(key Key, session Session) (success bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -105,9 +105,9 @@ func (r *registry) Register(key Key, session *SSHSession) (success bool) {
 		return false
 	}
 
-	userID := session.lifecycle.GetUser()
+	userID := session.Lifecycle().User()
 	if r.byUser[userID] == nil {
-		r.byUser[userID] = make(map[Key]*SSHSession)
+		r.byUser[userID] = make(map[Key]Session)
 	}
 
 	r.byUser[userID][key] = session
@@ -115,16 +115,16 @@ func (r *registry) Register(key Key, session *SSHSession) (success bool) {
 	return true
 }
 
-func (r *registry) GetAllSessionFromUser(user string) []*SSHSession {
+func (r *registry) GetAllSessionFromUser(user string) []Session {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	m := r.byUser[user]
 	if len(m) == 0 {
-		return []*SSHSession{}
+		return []Session{}
 	}
 
-	sessions := make([]*SSHSession, 0, len(m))
+	sessions := make([]Session, 0, len(m))
 	for _, s := range m {
 		sessions = append(sessions, s)
 	}

@@ -23,34 +23,34 @@ import (
 
 type Lifecycle interface {
 	Close() error
-	GetUser() string
+	User() string
 }
 
 type SessionRegistry interface {
 	Update(user string, oldKey, newKey types.SessionKey) error
 }
 
-type Controller interface {
+type Interaction interface {
+	Mode() types.Mode
 	SetChannel(channel ssh.Channel)
 	SetLifecycle(lifecycle Lifecycle)
-	Start()
-	SetWH(w, h int)
-	Redraw()
 	SetSessionRegistry(registry SessionRegistry)
 	SetMode(m types.Mode)
-	GetMode() types.Mode
+	SetWH(w, h int)
+	Start()
+	Redraw()
 	Send(message string) error
 }
 
 type Forwarder interface {
 	Close() error
-	GetTunnelType() types.TunnelType
-	GetForwardedPort() uint16
+	TunnelType() types.TunnelType
+	ForwardedPort() uint16
 }
 
-type Interaction struct {
+type interaction struct {
 	channel         ssh.Channel
-	slugManager     slug.Manager
+	slug            slug.Slug
 	forwarder       Forwarder
 	lifecycle       Lifecycle
 	sessionRegistry SessionRegistry
@@ -60,22 +60,22 @@ type Interaction struct {
 	mode            types.Mode
 }
 
-func (i *Interaction) SetMode(m types.Mode) {
+func (i *interaction) SetMode(m types.Mode) {
 	i.mode = m
 }
 
-func (i *Interaction) GetMode() types.Mode {
+func (i *interaction) Mode() types.Mode {
 	return i.mode
 }
 
-func (i *Interaction) Send(message string) error {
+func (i *interaction) Send(message string) error {
 	if i.channel != nil {
 		_, err := i.channel.Write([]byte(message))
 		return err
 	}
 	return nil
 }
-func (i *Interaction) SetWH(w, h int) {
+func (i *interaction) SetWH(w, h int) {
 	if i.program != nil {
 		i.program.Send(tea.WindowSizeMsg{
 			Width:  w,
@@ -103,14 +103,14 @@ type model struct {
 	commandList       list.Model
 	slugInput         textinput.Model
 	slugError         string
-	interaction       *Interaction
+	interaction       *interaction
 	width             int
 	height            int
 }
 
 func (m *model) getTunnelURL() string {
 	if m.tunnelType == types.HTTP {
-		return buildURL(m.protocol, m.interaction.slugManager.Get(), m.domain)
+		return buildURL(m.protocol, m.interaction.slug.String(), m.domain)
 	}
 	return fmt.Sprintf("tcp://%s:%d", m.domain, m.port)
 }
@@ -123,11 +123,11 @@ type keymap struct {
 
 type tickMsg time.Time
 
-func NewInteraction(slugManager slug.Manager, forwarder Forwarder) *Interaction {
+func New(slug slug.Slug, forwarder Forwarder) Interaction {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Interaction{
+	return &interaction{
 		channel:         nil,
-		slugManager:     slugManager,
+		slug:            slug,
 		forwarder:       forwarder,
 		lifecycle:       nil,
 		sessionRegistry: nil,
@@ -137,19 +137,19 @@ func NewInteraction(slugManager slug.Manager, forwarder Forwarder) *Interaction 
 	}
 }
 
-func (i *Interaction) SetSessionRegistry(registry SessionRegistry) {
+func (i *interaction) SetSessionRegistry(registry SessionRegistry) {
 	i.sessionRegistry = registry
 }
 
-func (i *Interaction) SetLifecycle(lifecycle Lifecycle) {
+func (i *interaction) SetLifecycle(lifecycle Lifecycle) {
 	i.lifecycle = lifecycle
 }
 
-func (i *Interaction) SetChannel(channel ssh.Channel) {
+func (i *interaction) SetChannel(channel ssh.Channel) {
 	i.channel = channel
 }
 
-func (i *Interaction) Stop() {
+func (i *interaction) Stop() {
 	if i.cancel != nil {
 		i.cancel()
 	}
@@ -242,8 +242,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(tea.ClearScreen, textinput.Blink)
 			case "enter":
 				inputValue := m.slugInput.Value()
-				if err := m.interaction.sessionRegistry.Update(m.interaction.lifecycle.GetUser(), types.SessionKey{
-					Id:   m.interaction.slugManager.Get(),
+				if err := m.interaction.sessionRegistry.Update(m.interaction.lifecycle.User(), types.SessionKey{
+					Id:   m.interaction.slug.String(),
 					Type: types.HTTP,
 				}, types.SessionKey{
 					Id:   inputValue,
@@ -285,7 +285,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if item.name == "slug" {
 						m.showingCommands = false
 						m.editingSlug = true
-						m.slugInput.SetValue(m.interaction.slugManager.Get())
+						m.slugInput.SetValue(m.interaction.slug.String())
 						m.slugInput.Focus()
 						return m, tea.Batch(tea.ClearScreen, textinput.Blink)
 					} else if item.name == "tunnel-type" {
@@ -317,7 +317,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (i *Interaction) Redraw() {
+func (i *interaction) Redraw() {
 	if i.program != nil {
 		i.program.Send(tea.ClearScreen())
 	}
@@ -691,7 +691,7 @@ func (m *model) View() string {
 		MarginBottom(boxMargin).
 		Width(boxMaxWidth)
 
-	authenticatedUser := m.interaction.lifecycle.GetUser()
+	authenticatedUser := m.interaction.lifecycle.User()
 
 	userInfoStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FAFAFA")).
@@ -767,7 +767,7 @@ func (m *model) View() string {
 	return b.String()
 }
 
-func (i *Interaction) Start() {
+func (i *interaction) Start() {
 	if i.mode == types.HEADLESS {
 		return
 	}
@@ -779,8 +779,8 @@ func (i *Interaction) Start() {
 		protocol = "https"
 	}
 
-	tunnelType := i.forwarder.GetTunnelType()
-	port := i.forwarder.GetForwardedPort()
+	tunnelType := i.forwarder.TunnelType()
+	port := i.forwarder.ForwardedPort()
 
 	items := []list.Item{
 		commandItem{name: "slug", desc: "Set custom subdomain"},

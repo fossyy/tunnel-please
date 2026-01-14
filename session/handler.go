@@ -15,7 +15,7 @@ import (
 
 var blockedReservedPorts = []uint16{1080, 1433, 1521, 1900, 2049, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 9000, 9200, 27017}
 
-func (s *SSHSession) HandleGlobalRequest(GlobalRequest <-chan *ssh.Request) {
+func (s *session) HandleGlobalRequest(GlobalRequest <-chan *ssh.Request) {
 	for req := range GlobalRequest {
 		switch req.Type {
 		case "shell", "pty-req":
@@ -56,7 +56,7 @@ func (s *SSHSession) HandleGlobalRequest(GlobalRequest <-chan *ssh.Request) {
 	}
 }
 
-func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
+func (s *session) HandleTCPIPForward(req *ssh.Request) {
 	log.Println("Port forwarding request detected")
 
 	fail := func(msg string) {
@@ -103,7 +103,7 @@ func (s *SSHSession) HandleTCPIPForward(req *ssh.Request) {
 	}
 }
 
-func (s *SSHSession) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
+func (s *session) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 	fail := func(msg string, key *types.SessionKey) {
 		log.Println(msg)
 		if key != nil {
@@ -137,11 +137,11 @@ func (s *SSHSession) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 
 	s.forwarder.SetType(types.HTTP)
 	s.forwarder.SetForwardedPort(portToBind)
-	s.slugManager.Set(slug)
+	s.slug.Set(slug)
 	s.lifecycle.SetStatus(types.RUNNING)
 }
 
-func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind uint16) {
+func (s *session) HandleTCPForward(req *ssh.Request, addr string, portToBind uint16) {
 	fail := func(msg string) {
 		log.Println(msg)
 		if err := req.Reply(false, nil); err != nil {
@@ -219,7 +219,7 @@ func (s *SSHSession) HandleTCPForward(req *ssh.Request, addr string, portToBind 
 	s.forwarder.SetType(types.TCP)
 	s.forwarder.SetListener(listener)
 	s.forwarder.SetForwardedPort(portToBind)
-	s.slugManager.Set(key.Id)
+	s.slug.Set(key.Id)
 	s.lifecycle.SetStatus(types.RUNNING)
 	go s.forwarder.AcceptTCPConnections()
 }

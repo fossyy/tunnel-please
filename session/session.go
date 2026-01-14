@@ -14,61 +14,6 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-type Session interface {
-	HandleGlobalRequest(ch <-chan *ssh.Request)
-	HandleTCPIPForward(req *ssh.Request)
-	HandleHTTPForward(req *ssh.Request, port uint16)
-	HandleTCPForward(req *ssh.Request, addr string, port uint16)
-}
-
-type SSHSession struct {
-	initialReq    <-chan *ssh.Request
-	sshReqChannel <-chan ssh.NewChannel
-	lifecycle     lifecycle.SessionLifecycle
-	interaction   interaction.Controller
-	forwarder     forwarder.ForwardingController
-	slugManager   slug.Manager
-	registry      Registry
-}
-
-func (s *SSHSession) GetLifecycle() lifecycle.SessionLifecycle {
-	return s.lifecycle
-}
-
-func (s *SSHSession) GetInteraction() interaction.Controller {
-	return s.interaction
-}
-
-func (s *SSHSession) GetForwarder() forwarder.ForwardingController {
-	return s.forwarder
-}
-
-func (s *SSHSession) GetSlugManager() slug.Manager {
-	return s.slugManager
-}
-
-func New(conn *ssh.ServerConn, forwardingReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel, sessionRegistry Registry, user string) *SSHSession {
-	slugManager := slug.NewManager()
-	forwarderManager := forwarder.NewForwarder(slugManager)
-	interactionManager := interaction.NewInteraction(slugManager, forwarderManager)
-	lifecycleManager := lifecycle.NewLifecycle(conn, forwarderManager, slugManager, user)
-
-	interactionManager.SetLifecycle(lifecycleManager)
-	forwarderManager.SetLifecycle(lifecycleManager)
-	interactionManager.SetSessionRegistry(sessionRegistry)
-	lifecycleManager.SetSessionRegistry(sessionRegistry)
-
-	return &SSHSession{
-		initialReq:    forwardingReq,
-		sshReqChannel: sshChan,
-		lifecycle:     lifecycleManager,
-		interaction:   interactionManager,
-		forwarder:     forwarderManager,
-		slugManager:   slugManager,
-		registry:      sessionRegistry,
-	}
-}
-
 type Detail struct {
 	ForwardingType string    `json:"forwarding_type,omitempty"`
 	Slug           string    `json:"slug,omitempty"`
@@ -77,21 +22,90 @@ type Detail struct {
 	StartedAt      time.Time `json:"started_at,omitempty"`
 }
 
-func (s *SSHSession) Detail() Detail {
-	return Detail{
-		ForwardingType: string(s.forwarder.GetTunnelType()),
-		Slug:           s.slugManager.Get(),
-		UserID:         s.lifecycle.GetUser(),
+type Session interface {
+	HandleGlobalRequest(ch <-chan *ssh.Request)
+	HandleTCPIPForward(req *ssh.Request)
+	HandleHTTPForward(req *ssh.Request, port uint16)
+	HandleTCPForward(req *ssh.Request, addr string, port uint16)
+	Lifecycle() lifecycle.Lifecycle
+	Interaction() interaction.Interaction
+	Forwarder() forwarder.Forwarder
+	Slug() slug.Slug
+	Detail() *Detail
+	Start() error
+}
+
+type session struct {
+	initialReq  <-chan *ssh.Request
+	sshChan     <-chan ssh.NewChannel
+	lifecycle   lifecycle.Lifecycle
+	interaction interaction.Interaction
+	forwarder   forwarder.Forwarder
+	slug        slug.Slug
+	registry    Registry
+}
+
+func New(conn *ssh.ServerConn, initialReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel, sessionRegistry Registry, user string) Session {
+	slugManager := slug.New()
+	forwarderManager := forwarder.New(slugManager)
+	interactionManager := interaction.New(slugManager, forwarderManager)
+	lifecycleManager := lifecycle.New(conn, forwarderManager, slugManager, user)
+
+	interactionManager.SetLifecycle(lifecycleManager)
+	forwarderManager.SetLifecycle(lifecycleManager)
+	interactionManager.SetSessionRegistry(sessionRegistry)
+	lifecycleManager.SetSessionRegistry(sessionRegistry)
+
+	return &session{
+		initialReq:  initialReq,
+		sshChan:     sshChan,
+		lifecycle:   lifecycleManager,
+		interaction: interactionManager,
+		forwarder:   forwarderManager,
+		slug:        slugManager,
+		registry:    sessionRegistry,
+	}
+}
+
+func (s *session) Lifecycle() lifecycle.Lifecycle {
+	return s.lifecycle
+}
+
+func (s *session) Interaction() interaction.Interaction {
+	return s.interaction
+}
+
+func (s *session) Forwarder() forwarder.Forwarder {
+	return s.forwarder
+}
+
+func (s *session) Slug() slug.Slug {
+	return s.slug
+}
+
+func (s *session) Detail() *Detail {
+	var tunnelType string
+	if s.forwarder.TunnelType() == types.HTTP {
+		tunnelType = "HTTP"
+	} else if s.forwarder.TunnelType() == types.TCP {
+		tunnelType = "TCP"
+	} else {
+		tunnelType = "UNKNOWN"
+	}
+	return &Detail{
+		ForwardingType: tunnelType,
+		Slug:           s.slug.String(),
+		UserID:         s.lifecycle.User(),
 		Active:         s.lifecycle.IsActive(),
 		StartedAt:      s.lifecycle.StartedAt(),
 	}
 }
 
-func (s *SSHSession) Start() error {
+func (s *session) Start() error {
 	var channel ssh.NewChannel
 	var ok bool
 	select {
-	case channel, ok = <-s.sshReqChannel:
+	case channel, ok = <-s.sshChan:
 		if !ok {
 			log.Println("Forwarding request channel closed")
 			return nil
@@ -122,7 +136,7 @@ func (s *SSHSession) Start() error {
 		return fmt.Errorf("no forwarding Request")
 	}
 
-	if (s.interaction.GetMode() == types.HEADLESS && config.Getenv("MODE", "standalone") == "standalone") && s.lifecycle.GetUser() == "UNAUTHORIZED" {
+	if (s.interaction.Mode() == types.HEADLESS && config.Getenv("MODE", "standalone") == "standalone") && s.lifecycle.User() == "UNAUTHORIZED" {
 		if err := tcpipReq.Reply(false, nil); err != nil {
 			log.Printf("cannot reply to tcpip req: %s\n", err)
 			return err
@@ -137,7 +151,7 @@ func (s *SSHSession) Start() error {
 	s.HandleTCPIPForward(tcpipReq)
 	s.interaction.Start()
 
-	s.lifecycle.GetConnection().Wait()
+	s.lifecycle.Connection().Wait()
 	if err := s.lifecycle.Close(); err != nil {
 		log.Printf("failed to close session: %v", err)
 		return err
@@ -145,7 +159,7 @@ func (s *SSHSession) Start() error {
 	return nil
 }
 
-func (s *SSHSession) waitForTCPIPForward() *ssh.Request {
+func (s *session) waitForTCPIPForward() *ssh.Request {
 	select {
 	case req, ok := <-s.initialReq:
 		if !ok {
