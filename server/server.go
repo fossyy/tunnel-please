@@ -14,14 +14,18 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-type Server struct {
-	conn            *net.Listener
+type Server interface {
+	Start()
+	Close() error
+}
+type server struct {
+	listener        net.Listener
 	config          *ssh.ServerConfig
 	sessionRegistry session.Registry
-	grpcClient      *client.Client
+	grpcClient      client.Client
 }
 
-func NewServer(sshConfig *ssh.ServerConfig, sessionRegistry session.Registry, grpcClient *client.Client) (*Server, error) {
+func New(sshConfig *ssh.ServerConfig, sessionRegistry session.Registry, grpcClient client.Client) (Server, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", config.Getenv("PORT", "2200")))
 	if err != nil {
 		log.Fatalf("failed to listen on port 2200: %v", err)
@@ -43,19 +47,23 @@ func NewServer(sshConfig *ssh.ServerConfig, sessionRegistry session.Registry, gr
 		}
 	}
 
-	return &Server{
-		conn:            &listener,
+	return &server{
+		listener:        listener,
 		config:          sshConfig,
 		sessionRegistry: sessionRegistry,
 		grpcClient:      grpcClient,
 	}, nil
 }
 
-func (s *Server) Start() {
+func (s *server) Start() {
 	log.Println("SSH server is starting on port 2200...")
 	for {
-		conn, err := (*s.conn).Accept()
+		conn, err := s.listener.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				log.Println("listener closed, stopping server")
+				return
+			}
 			log.Printf("failed to accept connection: %v", err)
 			continue
 		}
@@ -64,7 +72,11 @@ func (s *Server) Start() {
 	}
 }
 
-func (s *Server) handleConnection(conn net.Conn) {
+func (s *server) Close() error {
+	return s.listener.Close()
+}
+
+func (s *server) handleConnection(conn net.Conn) {
 	sshConn, chans, forwardingReqs, err := ssh.NewServerConn(conn, s.config)
 	if err != nil {
 		log.Printf("failed to establish SSH connection: %v", err)
