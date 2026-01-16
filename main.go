@@ -49,7 +49,7 @@ func main() {
 
 	sshConfig := &ssh.ServerConfig{
 		NoClientAuth:  true,
-		ServerVersion: fmt.Sprintf("SSH-2.0-TunnlPls-%s", version.GetShortVersion()),
+		ServerVersion: fmt.Sprintf("SSH-2.0-TunnelPlease-%s", version.GetShortVersion()),
 	}
 
 	sshKeyPath := "certs/ssh/id_rsa"
@@ -77,7 +77,7 @@ func main() {
 	shutdownChan := make(chan os.Signal, 1)
 	signal.Notify(shutdownChan, os.Interrupt, syscall.SIGTERM)
 
-	var grpcClient *client.Client
+	var grpcClient client.Client
 	if isNodeMode {
 		grpcHost := config.Getenv("GRPC_ADDRESS", "localhost")
 		grpcPort := config.Getenv("GRPC_PORT", "8080")
@@ -87,21 +87,13 @@ func main() {
 			log.Fatalf("NODE_TOKEN is required in node mode")
 		}
 
-		c, err := client.New(&client.GrpcConfig{
-			Address:            grpcAddr,
-			UseTLS:             false,
-			InsecureSkipVerify: false,
-			Timeout:            10 * time.Second,
-			KeepAlive:          true,
-			MaxRetries:         3,
-		}, sessionRegistry)
+		grpcClient, err = client.New(grpcAddr, sessionRegistry)
 		if err != nil {
 			log.Fatalf("failed to create grpc client: %v", err)
 		}
-		grpcClient = c
 
 		healthCtx, healthCancel := context.WithTimeout(ctx, 5*time.Second)
-		if err := grpcClient.CheckServerHealth(healthCtx); err != nil {
+		if err = grpcClient.CheckServerHealth(healthCtx); err != nil {
 			healthCancel()
 			log.Fatalf("gRPC health check failed: %v", err)
 		}
@@ -109,14 +101,15 @@ func main() {
 
 		go func() {
 			identity := config.Getenv("DOMAIN", "localhost")
-			if err := grpcClient.SubscribeEvents(ctx, identity, nodeToken); err != nil {
+			if err = grpcClient.SubscribeEvents(ctx, identity, nodeToken); err != nil {
 				errChan <- fmt.Errorf("failed to subscribe to events: %w", err)
 			}
 		}()
 	}
 
+	var app server.Server
 	go func() {
-		app, err := server.NewServer(sshConfig, sessionRegistry, grpcClient)
+		app, err = server.New(sshConfig, sessionRegistry, grpcClient)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to start server: %s", err)
 			return
@@ -125,7 +118,7 @@ func main() {
 	}()
 
 	select {
-	case err := <-errChan:
+	case err = <-errChan:
 		log.Printf("error happen : %s", err)
 	case sig := <-shutdownChan:
 		log.Printf("received signal %s, shutting down", sig)
@@ -133,8 +126,14 @@ func main() {
 
 	cancel()
 
+	if app != nil {
+		if err = app.Close(); err != nil {
+			log.Printf("failed to close server : %s", err)
+		}
+	}
+
 	if grpcClient != nil {
-		if err := grpcClient.Close(); err != nil {
+		if err = grpcClient.Close(); err != nil {
 			log.Printf("failed to close grpc conn : %s", err)
 		}
 	}
