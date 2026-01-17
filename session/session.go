@@ -291,7 +291,11 @@ func (s *session) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 		}
 	}
 
-	randomString := random.GenerateRandomString(20)
+	randomString, err := random.GenerateRandomString(20)
+	if err != nil {
+		fail(fmt.Sprintf("Failed to create slug: %s", err), nil)
+		return
+	}
 	key := types.SessionKey{Id: randomString, Type: types.HTTP}
 	if !s.registry.Register(key, s) {
 		fail(fmt.Sprintf("Failed to register client with slug: %s", randomString), nil)
@@ -299,7 +303,7 @@ func (s *session) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
 	}
 
 	buf := new(bytes.Buffer)
-	err := binary.Write(buf, binary.BigEndian, uint32(portToBind))
+	err = binary.Write(buf, binary.BigEndian, uint32(portToBind))
 	if err != nil {
 		fail(fmt.Sprintf("Failed to write port to buffer: %v", err), &key)
 		return

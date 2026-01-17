@@ -1,18 +1,18 @@
 package random
 
-import (
-	mathrand "math/rand"
-	"strings"
-	"time"
-)
+import "crypto/rand"
 
-func GenerateRandomString(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyz"
-	seededRand := mathrand.New(mathrand.NewSource(time.Now().UnixNano() + int64(mathrand.Intn(9999))))
-	var result strings.Builder
-	for i := 0; i < length; i++ {
-		randomIndex := seededRand.Intn(len(charset))
-		result.WriteString(string(charset[randomIndex]))
+func GenerateRandomString(length int) (string, error) {
+	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, length)
+
+	if _, err := rand.Read(b); err != nil {
+		return "", err
 	}
-	return result.String()
+
+	for i := range b {
+		b[i] = charset[int(b[i])%len(charset)]
+	}
+
+	return string(b), nil
 }
