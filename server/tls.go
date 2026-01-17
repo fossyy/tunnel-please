@@ -301,22 +301,16 @@ func (tm *tlsManager) initCertMagic() error {
 func (tm *tlsManager) getTLSConfig() *tls.Config {
 	return &tls.Config{
 		GetCertificate: tm.getCertificate,
-		MinVersion:     tls.VersionTLS13,
-		MaxVersion:     tls.VersionTLS13,
 
-		SessionTicketsDisabled: false,
-
-		CipherSuites: []uint16{
-			tls.TLS_AES_128_GCM_SHA256,
-			tls.TLS_CHACHA20_POLY1305_SHA256,
-		},
+		MinVersion: tls.VersionTLS13,
+		MaxVersion: tls.VersionTLS13,
 
 		CurvePreferences: []tls.CurveID{
 			tls.X25519,
 		},
 
-		ClientAuth: tls.NoClientCert,
-		NextProtos: nil,
+		SessionTicketsDisabled: false,
+		ClientAuth:             tls.NoClientCert,
 	}
 }
 
