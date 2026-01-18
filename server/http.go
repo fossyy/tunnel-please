@@ -347,7 +347,18 @@ func forwardRequest(cw HTTPWriter, initialRequest RequestHeaderManager, sshSessi
 
 	go func() {
 		channel, reqs, err := sshSession.Lifecycle().Connection().OpenChannel("forwarded-tcpip", payload)
-		resultChan <- channelResult{channel, reqs, err}
+		select {
+		case resultChan <- channelResult{channel, reqs, err}:
+		default:
+			if channel != nil {
+				err := channel.Close()
+				if err != nil {
+					log.Printf("Failed to close unused channel: %v", err)
+					return
+				}
+				go ssh.DiscardRequests(reqs)
+			}
+		}
 	}()
 
 	var channel ssh.Channel
