@@ -30,7 +30,6 @@ type Interaction interface {
 	Mode() types.Mode
 	SetChannel(channel ssh.Channel)
 	SetLifecycle(lifecycle Lifecycle)
-	SetSessionRegistry(registry SessionRegistry)
 	SetMode(m types.Mode)
 	SetWH(w, h int)
 	Start()
@@ -80,22 +79,18 @@ func (i *interaction) SetWH(w, h int) {
 	}
 }
 
-func New(slug slug.Slug, forwarder Forwarder) Interaction {
+func New(slug slug.Slug, forwarder Forwarder, sessionRegistry SessionRegistry) Interaction {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &interaction{
 		channel:         nil,
 		slug:            slug,
 		forwarder:       forwarder,
 		lifecycle:       nil,
-		sessionRegistry: nil,
+		sessionRegistry: sessionRegistry,
 		program:         nil,
 		ctx:             ctx,
 		cancel:          cancel,
 	}
-}
-
-func (i *interaction) SetSessionRegistry(registry SessionRegistry) {
-	i.sessionRegistry = registry
 }
 
 func (i *interaction) SetLifecycle(lifecycle Lifecycle) {

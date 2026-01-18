@@ -3,53 +3,30 @@ package port
 import (
 	"fmt"
 	"sort"
-	"strconv"
-	"strings"
 	"sync"
-	"tunnel_pls/internal/config"
 )
 
-type Manager interface {
+type Registry interface {
 	AddPortRange(startPort, endPort uint16) error
 	GetUnassignedPort() (uint16, bool)
 	SetPortStatus(port uint16, assigned bool) error
 	ClaimPort(port uint16) (claimed bool)
 }
 
-type manager struct {
+type registry struct {
 	mu          sync.RWMutex
 	ports       map[uint16]bool
 	sortedPorts []uint16
 }
 
-var Default Manager = &manager{
-	ports:       make(map[uint16]bool),
-	sortedPorts: []uint16{},
+func New() Registry {
+	return &registry{
+		ports:       make(map[uint16]bool),
+		sortedPorts: []uint16{},
+	}
 }
 
-func init() {
-	rawRange := config.Getenv("ALLOWED_PORTS", "")
-	if rawRange == "" {
-		return
-	}
-
-	splitRange := strings.Split(rawRange, "-")
-	if len(splitRange) != 2 {
-		return
-	}
-
-	start, err := strconv.ParseUint(splitRange[0], 10, 16)
-	if err != nil {
-		return
-	}
-	end, err := strconv.ParseUint(splitRange[1], 10, 16)
-	if err != nil {
-		return
-	}
-	_ = Default.AddPortRange(uint16(start), uint16(end))
-}
-
-func (pm *manager) AddPortRange(startPort, endPort uint16) error {
+func (pm *registry) AddPortRange(startPort, endPort uint16) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -68,7 +45,7 @@ func (pm *manager) AddPortRange(startPort, endPort uint16) error {
 	return nil
 }
 
-func (pm *manager) GetUnassignedPort() (uint16, bool) {
+func (pm *registry) GetUnassignedPort() (uint16, bool) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -80,7 +57,7 @@ func (pm *manager) GetUnassignedPort() (uint16, bool) {
 	return 0, false
 }
 
-func (pm *manager) SetPortStatus(port uint16, assigned bool) error {
+func (pm *registry) SetPortStatus(port uint16, assigned bool) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -88,7 +65,7 @@ func (pm *manager) SetPortStatus(port uint16, assigned bool) error {
 	return nil
 }
 
-func (pm *manager) ClaimPort(port uint16) (claimed bool) {
+func (pm *registry) ClaimPort(port uint16) (claimed bool) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
