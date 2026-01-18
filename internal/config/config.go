@@ -1,19 +1,17 @@
 package config
 
 import (
-	"log"
 	"os"
 	"strconv"
 
 	"github.com/joho/godotenv"
 )
 
-func init() {
+func Load() error {
 	if _, err := os.Stat(".env"); err == nil {
-		if err := godotenv.Load(".env"); err != nil {
-			log.Printf("Warning: Failed to load .env file: %s", err)
-		}
+		return godotenv.Load(".env")
 	}
+	return nil
 }
 
 func Getenv(key, defaultValue string) string {

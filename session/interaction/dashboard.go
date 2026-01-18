@@ -109,7 +109,7 @@ func (m *model) dashboardView() string {
 		MarginBottom(boxMargin).
 		Width(boxMaxWidth)
 
-	authenticatedUser := m.interaction.lifecycle.User()
+	authenticatedUser := m.interaction.user
 
 	userInfoStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FAFAFA")).

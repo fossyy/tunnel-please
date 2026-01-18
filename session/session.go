@@ -54,16 +54,11 @@ type session struct {
 
 var blockedReservedPorts = []uint16{1080, 1433, 1521, 1900, 2049, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 9000, 9200, 27017}
 
-func New(conn *ssh.ServerConn, initialReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel, sessionRegistry Registry, user string) Session {
+func New(conn *ssh.ServerConn, initialReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel, sessionRegistry Registry, portRegistry portUtil.Registry, user string) Session {
 	slugManager := slug.New()
-	forwarderManager := forwarder.New(slugManager)
-	interactionManager := interaction.New(slugManager, forwarderManager)
-	lifecycleManager := lifecycle.New(conn, forwarderManager, slugManager, user)
-
-	interactionManager.SetLifecycle(lifecycleManager)
-	forwarderManager.SetLifecycle(lifecycleManager)
-	interactionManager.SetSessionRegistry(sessionRegistry)
-	lifecycleManager.SetSessionRegistry(sessionRegistry)
+	forwarderManager := forwarder.New(slugManager, conn)
+	lifecycleManager := lifecycle.New(conn, forwarderManager, slugManager, portRegistry, sessionRegistry, user)
+	interactionManager := interaction.New(slugManager, forwarderManager, sessionRegistry, user, lifecycleManager.Close)
 
 	return &session{
 		initialReq:  initialReq,
@@ -135,7 +130,7 @@ func (s *session) Start() error {
 
 	tcpipReq := s.waitForTCPIPForward()
 	if tcpipReq == nil {
-		err := s.interaction.Send(fmt.Sprintf("Port forwarding request not received. Ensure you ran the correct command with -R flag. Example: ssh %s -p %s -R 80:localhost:3000", config.Getenv("DOMAIN", "localhost"), config.Getenv("PORT", "2200")))
+		err := s.interaction.Send(fmt.Sprintf("PortRegistry forwarding request not received. Ensure you ran the correct command with -R flag. Example: ssh %s -p %s -R 80:localhost:3000", config.Getenv("DOMAIN", "localhost"), config.Getenv("PORT", "2200")))
 		if err != nil {
 			return err
 		}
@@ -234,7 +229,7 @@ func (s *session) HandleGlobalRequest(GlobalRequest <-chan *ssh.Request) {
 }
 
 func (s *session) HandleTCPIPForward(req *ssh.Request) {
-	log.Println("Port forwarding request detected")
+	log.Println("PortRegistry forwarding request detected")
 
 	fail := func(msg string) {
 		log.Println(msg)
@@ -262,13 +257,13 @@ func (s *session) HandleTCPIPForward(req *ssh.Request) {
 	}
 
 	if rawPortToBind > 65535 {
-		fail(fmt.Sprintf("Port %d is larger than allowed port of 65535", rawPortToBind))
+		fail(fmt.Sprintf("PortRegistry %d is larger than allowed port of 65535", rawPortToBind))
 		return
 	}
 
 	portToBind := uint16(rawPortToBind)
 	if isBlockedPort(portToBind) {
-		fail(fmt.Sprintf("Port %d is blocked or restricted", portToBind))
+		fail(fmt.Sprintf("PortRegistry %d is blocked or restricted", portToBind))
 		return
 	}
 
@@ -340,7 +335,7 @@ func (s *session) HandleTCPForward(req *ssh.Request, addr string, portToBind uin
 			s.registry.Remove(*key)
 		}
 		if port != 0 {
-			if setErr := portUtil.Default.SetPortStatus(port, false); setErr != nil {
+			if setErr := s.lifecycle.PortRegistry().SetPortStatus(port, false); setErr != nil {
 				log.Printf("Failed to reset port status: %v", setErr)
 			}
 		}
@@ -356,7 +351,7 @@ func (s *session) HandleTCPForward(req *ssh.Request, addr string, portToBind uin
 	}
 
 	if portToBind == 0 {
-		unassigned, ok := portUtil.Default.GetUnassignedPort()
+		unassigned, ok := s.lifecycle.PortRegistry().GetUnassignedPort()
 		if !ok {
 			fail("No available port")
 			return
@@ -364,15 +359,15 @@ func (s *session) HandleTCPForward(req *ssh.Request, addr string, portToBind uin
 		portToBind = unassigned
 	}
 
-	if claimed := portUtil.Default.ClaimPort(portToBind); !claimed {
-		fail(fmt.Sprintf("Port %d is already in use or restricted", portToBind))
+	if claimed := s.lifecycle.PortRegistry().ClaimPort(portToBind); !claimed {
+		fail(fmt.Sprintf("PortRegistry %d is already in use or restricted", portToBind))
 		return
 	}
 
 	log.Printf("Requested forwarding on %s:%d", addr, portToBind)
 	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", portToBind))
 	if err != nil {
-		cleanup(fmt.Sprintf("Port %d is already in use or restricted", portToBind), portToBind, nil, nil)
+		cleanup(fmt.Sprintf("PortRegistry %d is already in use or restricted", portToBind), portToBind, nil, nil)
 		return
 	}
 

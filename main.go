@@ -8,12 +8,14 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/grpc/client"
 	"tunnel_pls/internal/key"
+	"tunnel_pls/internal/port"
 	"tunnel_pls/server"
 	"tunnel_pls/session"
 	"tunnel_pls/version"
@@ -32,6 +34,12 @@ func main() {
 
 	log.Printf("Starting %s", version.GetVersion())
 
+	err := config.Load()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %s", err)
+		return
+	}
+
 	mode := strings.ToLower(config.Getenv("MODE", "standalone"))
 	isNodeMode := mode == "node"
 
@@ -41,7 +49,7 @@ func main() {
 		go func() {
 			pprofAddr := fmt.Sprintf("localhost:%s", pprofPort)
 			log.Printf("Starting pprof server on http://%s/debug/pprof/", pprofAddr)
-			if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+			if err = http.ListenAndServe(pprofAddr, nil); err != nil {
 				log.Printf("pprof server error: %v", err)
 			}
 		}()
@@ -53,7 +61,7 @@ func main() {
 	}
 
 	sshKeyPath := "certs/ssh/id_rsa"
-	if err := key.GenerateSSHKeyIfNotExist(sshKeyPath); err != nil {
+	if err = key.GenerateSSHKeyIfNotExist(sshKeyPath); err != nil {
 		log.Fatalf("Failed to generate SSH key: %s", err)
 	}
 
@@ -107,9 +115,33 @@ func main() {
 		}()
 	}
 
+	portManager := port.New()
+	rawRange := config.Getenv("ALLOWED_PORTS", "")
+	if rawRange != "" {
+		splitRange := strings.Split(rawRange, "-")
+		if len(splitRange) == 2 {
+			var start, end uint64
+			start, err = strconv.ParseUint(splitRange[0], 10, 16)
+			if err != nil {
+				log.Fatalf("Failed to parse start port: %s", err)
+			}
+
+			end, err = strconv.ParseUint(splitRange[1], 10, 16)
+			if err != nil {
+				log.Fatalf("Failed to parse end port: %s", err)
+			}
+
+			if err = portManager.AddPortRange(uint16(start), uint16(end)); err != nil {
+				log.Fatalf("Failed to add port range: %s", err)
+			}
+			log.Printf("PortRegistry range configured: %d-%d", start, end)
+		} else {
+			log.Printf("Invalid ALLOWED_PORTS format, expected 'start-end', got: %s", rawRange)
+		}
+	}
 	var app server.Server
 	go func() {
-		app, err = server.New(sshConfig, sessionRegistry, grpcClient)
+		app, err = server.New(sshConfig, sessionRegistry, grpcClient, portManager)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to start server: %s", err)
 			return

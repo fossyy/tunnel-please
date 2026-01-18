@@ -28,7 +28,7 @@ func (m *model) slugUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
 	case "enter":
 		inputValue := m.slugInput.Value()
-		if err := m.interaction.sessionRegistry.Update(m.interaction.lifecycle.User(), types.SessionKey{
+		if err := m.interaction.sessionRegistry.Update(m.interaction.user, types.SessionKey{
 			Id:   m.interaction.slug.String(),
 			Type: types.HTTP,
 		}, types.SessionKey{
