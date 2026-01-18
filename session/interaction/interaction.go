@@ -17,25 +17,18 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-type Lifecycle interface {
-	Close() error
-	User() string
-}
-
-type SessionRegistry interface {
-	Update(user string, oldKey, newKey types.SessionKey) error
-}
-
 type Interaction interface {
 	Mode() types.Mode
 	SetChannel(channel ssh.Channel)
-	SetLifecycle(lifecycle Lifecycle)
-	SetSessionRegistry(registry SessionRegistry)
 	SetMode(m types.Mode)
 	SetWH(w, h int)
 	Start()
 	Redraw()
 	Send(message string) error
+}
+
+type SessionRegistry interface {
+	Update(user string, oldKey, newKey types.SessionKey) error
 }
 
 type Forwarder interface {
@@ -44,11 +37,13 @@ type Forwarder interface {
 	ForwardedPort() uint16
 }
 
+type CloseFunc func() error
 type interaction struct {
 	channel         ssh.Channel
 	slug            slug.Slug
 	forwarder       Forwarder
-	lifecycle       Lifecycle
+	closeFunc       CloseFunc
+	user            string
 	sessionRegistry SessionRegistry
 	program         *tea.Program
 	ctx             context.Context
@@ -80,26 +75,19 @@ func (i *interaction) SetWH(w, h int) {
 	}
 }
 
-func New(slug slug.Slug, forwarder Forwarder) Interaction {
+func New(slug slug.Slug, forwarder Forwarder, sessionRegistry SessionRegistry, user string, closeFunc CloseFunc) Interaction {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &interaction{
 		channel:         nil,
 		slug:            slug,
 		forwarder:       forwarder,
-		lifecycle:       nil,
-		sessionRegistry: nil,
+		closeFunc:       closeFunc,
+		user:            user,
+		sessionRegistry: sessionRegistry,
 		program:         nil,
 		ctx:             ctx,
 		cancel:          cancel,
 	}
-}
-
-func (i *interaction) SetSessionRegistry(registry SessionRegistry) {
-	i.sessionRegistry = registry
-}
-
-func (i *interaction) SetLifecycle(lifecycle Lifecycle) {
-	i.lifecycle = lifecycle
 }
 
 func (i *interaction) SetChannel(channel ssh.Channel) {
@@ -262,7 +250,9 @@ func (i *interaction) Start() {
 	}
 	i.program.Kill()
 	i.program = nil
-	if err := m.interaction.lifecycle.Close(); err != nil {
-		log.Printf("Cannot close session: %s \n", err)
+	if i.closeFunc != nil {
+		if err := i.closeFunc(); err != nil {
+			log.Printf("Cannot close session: %s \n", err)
+		}
 	}
 }

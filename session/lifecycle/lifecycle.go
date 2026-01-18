@@ -28,47 +28,44 @@ type lifecycle struct {
 	conn            ssh.Conn
 	channel         ssh.Channel
 	forwarder       Forwarder
-	sessionRegistry SessionRegistry
 	slug            slug.Slug
 	startedAt       time.Time
+	sessionRegistry SessionRegistry
+	portRegistry    portUtil.Registry
 	user            string
 }
 
-func New(conn ssh.Conn, forwarder Forwarder, slugManager slug.Slug, user string) Lifecycle {
+func New(conn ssh.Conn, forwarder Forwarder, slugManager slug.Slug, port portUtil.Registry, sessionRegistry SessionRegistry, user string) Lifecycle {
 	return &lifecycle{
 		status:          types.INITIALIZING,
 		conn:            conn,
 		channel:         nil,
 		forwarder:       forwarder,
 		slug:            slugManager,
-		sessionRegistry: nil,
 		startedAt:       time.Now(),
+		sessionRegistry: sessionRegistry,
+		portRegistry:    port,
 		user:            user,
 	}
 }
 
-func (l *lifecycle) SetSessionRegistry(registry SessionRegistry) {
-	l.sessionRegistry = registry
-}
-
 type Lifecycle interface {
 	Connection() ssh.Conn
-	Channel() ssh.Channel
+	PortRegistry() portUtil.Registry
 	User() string
 	SetChannel(channel ssh.Channel)
-	SetSessionRegistry(registry SessionRegistry)
 	SetStatus(status types.Status)
 	IsActive() bool
 	StartedAt() time.Time
 	Close() error
 }
 
-func (l *lifecycle) User() string {
-	return l.user
+func (l *lifecycle) PortRegistry() portUtil.Registry {
+	return l.portRegistry
 }
 
-func (l *lifecycle) Channel() ssh.Channel {
-	return l.channel
+func (l *lifecycle) User() string {
+	return l.user
 }
 
 func (l *lifecycle) SetChannel(channel ssh.Channel) {
@@ -116,7 +113,7 @@ func (l *lifecycle) Close() error {
 	l.sessionRegistry.Remove(key)
 
 	if tunnelType == types.TCP {
-		if err := portUtil.Default.SetPortStatus(l.forwarder.ForwardedPort(), false); err != nil && firstErr == nil {
+		if err := l.PortRegistry().SetPortStatus(l.forwarder.ForwardedPort(), false); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}

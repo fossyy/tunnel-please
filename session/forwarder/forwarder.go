@@ -35,26 +35,21 @@ type forwarder struct {
 	tunnelType    types.TunnelType
 	forwardedPort uint16
 	slug          slug.Slug
-	lifecycle     Lifecycle
+	conn          ssh.Conn
 }
 
-func New(slug slug.Slug) Forwarder {
+func New(slug slug.Slug, conn ssh.Conn) Forwarder {
 	return &forwarder{
 		listener:      nil,
 		tunnelType:    types.UNKNOWN,
 		forwardedPort: 0,
 		slug:          slug,
-		lifecycle:     nil,
+		conn:          conn,
 	}
-}
-
-type Lifecycle interface {
-	Connection() ssh.Conn
 }
 
 type Forwarder interface {
 	SetType(tunnelType types.TunnelType)
-	SetLifecycle(lifecycle Lifecycle)
 	SetForwardedPort(port uint16)
 	SetListener(listener net.Listener)
 	Listener() net.Listener
@@ -65,10 +60,6 @@ type Forwarder interface {
 	WriteBadGatewayResponse(dst io.Writer)
 	AcceptTCPConnections()
 	Close() error
-}
-
-func (f *forwarder) SetLifecycle(lifecycle Lifecycle) {
-	f.lifecycle = lifecycle
 }
 
 func (f *forwarder) AcceptTCPConnections() {
@@ -82,7 +73,7 @@ func (f *forwarder) AcceptTCPConnections() {
 			continue
 		}
 
-		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		if err = conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 			log.Printf("Failed to set connection deadline: %v", err)
 			if closeErr := conn.Close(); closeErr != nil {
 				log.Printf("Failed to close connection: %v", closeErr)
@@ -100,7 +91,7 @@ func (f *forwarder) AcceptTCPConnections() {
 		resultChan := make(chan channelResult, 1)
 
 		go func() {
-			channel, reqs, err := f.lifecycle.Connection().OpenChannel("forwarded-tcpip", payload)
+			channel, reqs, err := f.conn.OpenChannel("forwarded-tcpip", payload)
 			resultChan <- channelResult{channel, reqs, err}
 		}()
 
@@ -114,7 +105,7 @@ func (f *forwarder) AcceptTCPConnections() {
 				continue
 			}
 
-			if err := conn.SetDeadline(time.Time{}); err != nil {
+			if err = conn.SetDeadline(time.Time{}); err != nil {
 				log.Printf("Failed to clear connection deadline: %v", err)
 			}
 
