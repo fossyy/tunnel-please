@@ -124,18 +124,6 @@ func (f *forwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel, remoteA
 		if err != nil {
 			log.Printf("Failed to discard connection: %v", err)
 		}
-
-		err = src.Close()
-		if err != nil && !errors.Is(err, io.EOF) {
-			log.Printf("Error closing source channel: %v", err)
-		}
-
-		if closer, ok := dst.(io.Closer); ok {
-			err = closer.Close()
-			if err != nil && !errors.Is(err, io.EOF) {
-				log.Printf("Error closing destination connection: %v", err)
-			}
-		}
 	}()
 
 	log.Printf("Handling new forwarded connection from %s", remoteAddr)

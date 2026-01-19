@@ -33,8 +33,9 @@ func New(sshConfig *ssh.ServerConfig, sessionRegistry session.Registry, grpcClie
 		log.Fatalf("failed to listen on port 2200: %v", err)
 		return nil, err
 	}
+	redirectTLS := config.Getenv("TLS_ENABLED", "false") == "true" && config.Getenv("TLS_REDIRECT", "false") == "true"
 
-	HttpServer := NewHTTPServer(sessionRegistry)
+	HttpServer := NewHTTPServer(sessionRegistry, redirectTLS)
 	err = HttpServer.ListenAndServe()
 	if err != nil {
 		log.Fatalf("failed to start http server: %v", err)
