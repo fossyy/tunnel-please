@@ -30,10 +30,10 @@ type Detail struct {
 }
 
 type Session interface {
-	HandleGlobalRequest(ch <-chan *ssh.Request)
-	HandleTCPIPForward(req *ssh.Request)
-	HandleHTTPForward(req *ssh.Request, port uint16)
-	HandleTCPForward(req *ssh.Request, addr string, port uint16)
+	HandleGlobalRequest(ch <-chan *ssh.Request) error
+	HandleTCPIPForward(req *ssh.Request) error
+	HandleHTTPForward(req *ssh.Request, port uint16) error
+	HandleTCPForward(req *ssh.Request, addr string, port uint16) error
 	Lifecycle() lifecycle.Lifecycle
 	Interaction() interaction.Interaction
 	Forwarder() forwarder.Forwarder
@@ -88,14 +88,15 @@ func (s *session) Slug() slug.Slug {
 }
 
 func (s *session) Detail() *Detail {
-	var tunnelType string
-	if s.forwarder.TunnelType() == types.HTTP {
-		tunnelType = "HTTP"
-	} else if s.forwarder.TunnelType() == types.TCP {
-		tunnelType = "TCP"
-	} else {
+	tunnelTypeMap := map[types.TunnelType]string{
+		types.HTTP: "HTTP",
+		types.TCP:  "TCP",
+	}
+	tunnelType, ok := tunnelTypeMap[s.forwarder.TunnelType()]
+	if !ok {
 		tunnelType = "UNKNOWN"
 	}
+
 	return &Detail{
 		ForwardingType: tunnelType,
 		Slug:           s.slug.String(),
@@ -106,55 +107,80 @@ func (s *session) Detail() *Detail {
 }
 
 func (s *session) Start() error {
-	var channel ssh.NewChannel
-	var ok bool
-	select {
-	case channel, ok = <-s.sshChan:
-		if !ok {
-			log.Println("Forwarding request channel closed")
-			return nil
-		}
-		ch, reqs, err := channel.Accept()
-		if err != nil {
-			log.Printf("failed to accept channel: %v", err)
-			return err
-		}
-		go s.HandleGlobalRequest(reqs)
-
-		s.lifecycle.SetChannel(ch)
-		s.interaction.SetChannel(ch)
-		s.interaction.SetMode(types.INTERACTIVE)
-	case <-time.After(500 * time.Millisecond):
-		s.interaction.SetMode(types.HEADLESS)
+	if err := s.setupSessionMode(); err != nil {
+		return err
 	}
 
 	tcpipReq := s.waitForTCPIPForward()
 	if tcpipReq == nil {
-		err := s.interaction.Send(fmt.Sprintf("PortRegistry forwarding request not received. Ensure you ran the correct command with -R flag. Example: ssh %s -p %s -R 80:localhost:3000", config.Getenv("DOMAIN", "localhost"), config.Getenv("PORT", "2200")))
-		if err != nil {
-			return err
-		}
-		if err = s.lifecycle.Close(); err != nil {
-			log.Printf("failed to close session: %v", err)
-		}
-		return fmt.Errorf("no forwarding Request")
+		return s.handleMissingForwardRequest()
 	}
 
-	if (s.interaction.Mode() == types.HEADLESS && config.Getenv("MODE", "standalone") == "standalone") && s.lifecycle.User() == "UNAUTHORIZED" {
-		if err := tcpipReq.Reply(false, nil); err != nil {
-			log.Printf("cannot reply to tcpip req: %s\n", err)
-			return err
-		}
-		if err := s.lifecycle.Close(); err != nil {
-			log.Printf("failed to close session: %v", err)
-			return err
-		}
-		return nil
+	if s.shouldRejectUnauthorized() {
+		return s.denyForwardingRequest(tcpipReq, nil, nil, fmt.Sprintf("headless forwarding only allowed on node mode"))
 	}
 
-	s.HandleTCPIPForward(tcpipReq)
+	if err := s.HandleTCPIPForward(tcpipReq); err != nil {
+		return err
+	}
 	s.interaction.Start()
 
+	return s.waitForSessionEnd()
+}
+
+func (s *session) setupSessionMode() error {
+	select {
+	case channel, ok := <-s.sshChan:
+		if !ok {
+			log.Println("Forwarding request channel closed")
+			return nil
+		}
+		return s.setupInteractiveMode(channel)
+	case <-time.After(500 * time.Millisecond):
+		s.interaction.SetMode(types.HEADLESS)
+		return nil
+	}
+}
+
+func (s *session) setupInteractiveMode(channel ssh.NewChannel) error {
+	ch, reqs, err := channel.Accept()
+	if err != nil {
+		log.Printf("failed to accept channel: %v", err)
+		return err
+	}
+
+	go func() {
+		err = s.HandleGlobalRequest(reqs)
+		if err != nil {
+			log.Printf("global request handler error: %v", err)
+		}
+	}()
+
+	s.lifecycle.SetChannel(ch)
+	s.interaction.SetChannel(ch)
+	s.interaction.SetMode(types.INTERACTIVE)
+
+	return nil
+}
+
+func (s *session) handleMissingForwardRequest() error {
+	err := s.interaction.Send(fmt.Sprintf("PortRegistry forwarding request not received. Ensure you ran the correct command with -R flag. Example: ssh %s -p %s -R 80:localhost:3000", config.Getenv("DOMAIN", "localhost"), config.Getenv("PORT", "2200")))
+	if err != nil {
+		return err
+	}
+	if err = s.lifecycle.Close(); err != nil {
+		log.Printf("failed to close session: %v", err)
+	}
+	return fmt.Errorf("no forwarding Request")
+}
+
+func (s *session) shouldRejectUnauthorized() bool {
+	return s.interaction.Mode() == types.HEADLESS &&
+		config.Getenv("MODE", "standalone") == "standalone" &&
+		s.lifecycle.User() == "UNAUTHORIZED"
+}
+
+func (s *session) waitForSessionEnd() error {
 	if err := s.lifecycle.Connection().Wait(); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
 		log.Printf("ssh connection closed with error: %v", err)
 	}
@@ -187,220 +213,184 @@ func (s *session) waitForTCPIPForward() *ssh.Request {
 	}
 }
 
-func (s *session) HandleGlobalRequest(GlobalRequest <-chan *ssh.Request) {
+func (s *session) handleWindowChange(req *ssh.Request) error {
+	p := req.Payload
+	if len(p) < 16 {
+		log.Println("invalid window-change payload")
+		return req.Reply(false, nil)
+	}
+
+	cols := binary.BigEndian.Uint32(p[0:4])
+	rows := binary.BigEndian.Uint32(p[4:8])
+
+	s.interaction.SetWH(int(cols), int(rows))
+	return req.Reply(true, nil)
+}
+
+func (s *session) HandleGlobalRequest(GlobalRequest <-chan *ssh.Request) error {
 	for req := range GlobalRequest {
 		switch req.Type {
 		case "shell", "pty-req":
 			err := req.Reply(true, nil)
 			if err != nil {
-				log.Println("Failed to reply to request:", err)
-				return
+				return err
 			}
 		case "window-change":
-			p := req.Payload
-			if len(p) < 16 {
-				log.Println("invalid window-change payload")
-				err := req.Reply(false, nil)
-				if err != nil {
-					log.Println("Failed to reply to request:", err)
-					return
-				}
-				return
-			}
-			cols := binary.BigEndian.Uint32(p[0:4])
-			rows := binary.BigEndian.Uint32(p[4:8])
-
-			s.interaction.SetWH(int(cols), int(rows))
-
-			err := req.Reply(true, nil)
-			if err != nil {
-				log.Println("Failed to reply to request:", err)
-				return
+			if err := s.handleWindowChange(req); err != nil {
+				return err
 			}
 		default:
 			log.Println("Unknown request type:", req.Type)
 			err := req.Reply(false, nil)
 			if err != nil {
-				log.Println("Failed to reply to request:", err)
-				return
+				return err
 			}
 		}
 	}
+	return nil
 }
 
-func (s *session) HandleTCPIPForward(req *ssh.Request) {
-	log.Println("PortRegistry forwarding request detected")
-
-	fail := func(msg string) {
-		log.Println(msg)
-		if err := req.Reply(false, nil); err != nil {
-			log.Println("Failed to reply to request:", err)
-			return
-		}
-		if err := s.lifecycle.Close(); err != nil {
-			log.Printf("failed to close session: %v", err)
-		}
-	}
-
-	reader := bytes.NewReader(req.Payload)
-
-	addr, err := readSSHString(reader)
+func (s *session) parseForwardPayload(payloadReader io.Reader) (address string, port uint16, err error) {
+	address, err = readSSHString(payloadReader)
 	if err != nil {
-		fail(fmt.Sprintf("Failed to read address from payload: %v", err))
-		return
+		return "", 0, err
 	}
 
 	var rawPortToBind uint32
-	if err = binary.Read(reader, binary.BigEndian, &rawPortToBind); err != nil {
-		fail(fmt.Sprintf("Failed to read port from payload: %v", err))
-		return
+	if err = binary.Read(payloadReader, binary.BigEndian, &rawPortToBind); err != nil {
+		return "", 0, err
 	}
 
 	if rawPortToBind > 65535 {
-		fail(fmt.Sprintf("PortRegistry %d is larger than allowed port of 65535", rawPortToBind))
-		return
+		return "", 0, fmt.Errorf("port is larger than allowed port of 65535")
 	}
 
-	portToBind := uint16(rawPortToBind)
-	if isBlockedPort(portToBind) {
-		fail(fmt.Sprintf("PortRegistry %d is blocked or restricted", portToBind))
-		return
+	port = uint16(rawPortToBind)
+	if isBlockedPort(port) {
+		return "", 0, fmt.Errorf("port is block")
 	}
 
-	switch portToBind {
+	if port == 0 {
+		unassigned, ok := s.lifecycle.PortRegistry().GetUnassignedPort()
+		if !ok {
+			return "", 0, fmt.Errorf("no available port")
+		}
+		return address, unassigned, err
+	}
+
+	return address, port, err
+}
+
+func (s *session) denyForwardingRequest(req *ssh.Request, key *types.SessionKey, listener io.Closer, msg string) error {
+	var errs []error
+	if key != nil {
+		s.registry.Remove(*key)
+	}
+	if listener != nil {
+		if err := listener.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close listener: %w", err))
+		}
+	}
+	if err := req.Reply(false, nil); err != nil {
+		errs = append(errs, fmt.Errorf("reply request: %w", err))
+	}
+	if err := s.lifecycle.Close(); err != nil {
+		errs = append(errs, fmt.Errorf("close session: %w", err))
+	}
+	errs = append(errs, fmt.Errorf("deny forwarding request: %s", msg))
+	return errors.Join(errs...)
+}
+
+func (s *session) approveForwardingRequest(req *ssh.Request, port uint16) (err error) {
+	buf := new(bytes.Buffer)
+	err = binary.Write(buf, binary.BigEndian, uint32(port))
+	if err != nil {
+		return err
+	}
+
+	err = req.Reply(true, buf.Bytes())
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *session) finalizeForwarding(req *ssh.Request, portToBind uint16, listener net.Listener, tunnelType types.TunnelType, slug string) error {
+	err := s.approveForwardingRequest(req, portToBind)
+	if err != nil {
+		return err
+	}
+
+	s.forwarder.SetType(tunnelType)
+	s.forwarder.SetForwardedPort(portToBind)
+	s.slug.Set(slug)
+	s.lifecycle.SetStatus(types.RUNNING)
+
+	if listener != nil {
+		s.forwarder.SetListener(listener)
+		go s.forwarder.AcceptTCPConnections()
+	}
+
+	return nil
+}
+
+func (s *session) HandleTCPIPForward(req *ssh.Request) error {
+	reader := bytes.NewReader(req.Payload)
+
+	address, port, err := s.parseForwardPayload(reader)
+	if err != nil {
+		return s.denyForwardingRequest(req, nil, nil, fmt.Sprintf("cannot parse forwarded payload: %s", err.Error()))
+	}
+
+	switch port {
 	case 80, 443:
-		s.HandleHTTPForward(req, portToBind)
+		return s.HandleHTTPForward(req, port)
 	default:
-		s.HandleTCPForward(req, addr, portToBind)
+
+		return s.HandleTCPForward(req, address, port)
 	}
 }
 
-func (s *session) HandleHTTPForward(req *ssh.Request, portToBind uint16) {
-	fail := func(msg string, key *types.SessionKey) {
-		log.Println(msg)
-		if key != nil {
-			s.registry.Remove(*key)
-		}
-		if err := req.Reply(false, nil); err != nil {
-			log.Println("Failed to reply to request:", err)
-		}
-	}
-
+func (s *session) HandleHTTPForward(req *ssh.Request, portToBind uint16) error {
 	randomString, err := random.GenerateRandomString(20)
 	if err != nil {
-		fail(fmt.Sprintf("Failed to create slug: %s", err), nil)
-		return
+		return s.denyForwardingRequest(req, nil, nil, fmt.Sprintf("Failed to create slug: %s", err))
 	}
 	key := types.SessionKey{Id: randomString, Type: types.HTTP}
 	if !s.registry.Register(key, s) {
-		fail(fmt.Sprintf("Failed to register client with slug: %s", randomString), nil)
-		return
+		return s.denyForwardingRequest(req, nil, nil, fmt.Sprintf("Failed to register client with slug: %s", randomString))
 	}
 
-	buf := new(bytes.Buffer)
-	err = binary.Write(buf, binary.BigEndian, uint32(portToBind))
+	err = s.finalizeForwarding(req, portToBind, nil, types.HTTP, key.Id)
 	if err != nil {
-		fail(fmt.Sprintf("Failed to write port to buffer: %v", err), &key)
-		return
+		return s.denyForwardingRequest(req, &key, nil, fmt.Sprintf("Failed to finalize forwarding: %s", err))
 	}
-	log.Printf("HTTP forwarding approved on port: %d", portToBind)
-
-	err = req.Reply(true, buf.Bytes())
-	if err != nil {
-		fail(fmt.Sprintf("Failed to reply to request: %v", err), &key)
-		return
-	}
-
-	s.forwarder.SetType(types.HTTP)
-	s.forwarder.SetForwardedPort(portToBind)
-	s.slug.Set(randomString)
-	s.lifecycle.SetStatus(types.RUNNING)
+	return nil
 }
 
-func (s *session) HandleTCPForward(req *ssh.Request, addr string, portToBind uint16) {
-	fail := func(msg string) {
-		log.Println(msg)
-		if err := req.Reply(false, nil); err != nil {
-			log.Println("Failed to reply to request:", err)
-			return
-		}
-		if err := s.lifecycle.Close(); err != nil {
-			log.Printf("failed to close session: %v", err)
-		}
-	}
-
-	cleanup := func(msg string, port uint16, listener net.Listener, key *types.SessionKey) {
-		log.Println(msg)
-		if key != nil {
-			s.registry.Remove(*key)
-		}
-		if port != 0 {
-			if setErr := s.lifecycle.PortRegistry().SetPortStatus(port, false); setErr != nil {
-				log.Printf("Failed to reset port status: %v", setErr)
-			}
-		}
-		if listener != nil {
-			if closeErr := listener.Close(); closeErr != nil {
-				log.Printf("Failed to close listener: %v", closeErr)
-			}
-		}
-		if err := req.Reply(false, nil); err != nil {
-			log.Println("Failed to reply to request:", err)
-		}
-		_ = s.lifecycle.Close()
-	}
-
-	if portToBind == 0 {
-		unassigned, ok := s.lifecycle.PortRegistry().GetUnassignedPort()
-		if !ok {
-			fail("No available port")
-			return
-		}
-		portToBind = unassigned
-	}
-
+func (s *session) HandleTCPForward(req *ssh.Request, addr string, portToBind uint16) error {
 	if claimed := s.lifecycle.PortRegistry().ClaimPort(portToBind); !claimed {
-		fail(fmt.Sprintf("PortRegistry %d is already in use or restricted", portToBind))
-		return
+		return s.denyForwardingRequest(req, nil, nil, fmt.Sprintf("PortRegistry %d is already in use or restricted", portToBind))
 	}
 
-	log.Printf("Requested forwarding on %s:%d", addr, portToBind)
 	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", portToBind))
 	if err != nil {
-		cleanup(fmt.Sprintf("PortRegistry %d is already in use or restricted", portToBind), portToBind, nil, nil)
-		return
+		return s.denyForwardingRequest(req, nil, listener, fmt.Sprintf("PortRegistry %d is already in use or restricted", portToBind))
 	}
 
 	key := types.SessionKey{Id: fmt.Sprintf("%d", portToBind), Type: types.TCP}
-
 	if !s.registry.Register(key, s) {
-		cleanup(fmt.Sprintf("Failed to register TCP client with id: %s", key.Id), portToBind, listener, nil)
-		return
+		return s.denyForwardingRequest(req, nil, listener, fmt.Sprintf("Failed to register TCP client with id: %s", key.Id))
 	}
 
-	buf := new(bytes.Buffer)
-	err = binary.Write(buf, binary.BigEndian, uint32(portToBind))
+	err = s.finalizeForwarding(req, portToBind, listener, types.TCP, key.Id)
 	if err != nil {
-		cleanup(fmt.Sprintf("Failed to write port to buffer: %v", err), portToBind, listener, &key)
-		return
+		return s.denyForwardingRequest(req, &key, listener, fmt.Sprintf("Failed to finalize forwarding: %s", err))
 	}
-
-	log.Printf("TCP forwarding approved on port: %d", portToBind)
-	err = req.Reply(true, buf.Bytes())
-	if err != nil {
-		cleanup(fmt.Sprintf("Failed to reply to request: %v", err), portToBind, listener, &key)
-		return
-	}
-
-	s.forwarder.SetType(types.TCP)
-	s.forwarder.SetListener(listener)
-	s.forwarder.SetForwardedPort(portToBind)
-	s.slug.Set(key.Id)
-	s.lifecycle.SetStatus(types.RUNNING)
-	go s.forwarder.AcceptTCPConnections()
+	return nil
 }
 
-func readSSHString(reader *bytes.Reader) (string, error) {
+func readSSHString(reader io.Reader) (string, error) {
 	var length uint32
 	if err := binary.Read(reader, binary.BigEndian, &length); err != nil {
 		return "", err
