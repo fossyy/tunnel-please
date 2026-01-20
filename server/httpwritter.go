@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"regexp"
+	"tunnel_pls/internal/httpheader"
 )
 
 type HTTPWriter interface {
@@ -14,11 +15,11 @@ type HTTPWriter interface {
 	RemoteAddr() net.Addr
 	UseResponseMiddleware(mw ResponseMiddleware)
 	UseRequestMiddleware(mw RequestMiddleware)
-	SetRequestHeader(header RequestHeader)
+	SetRequestHeader(header httpheader.RequestHeader)
 	RequestMiddlewares() []RequestMiddleware
 	ResponseMiddlewares() []ResponseMiddleware
-	ApplyResponseMiddlewares(resphf ResponseHeader, body []byte) error
-	ApplyRequestMiddlewares(reqhf RequestHeader) error
+	ApplyResponseMiddlewares(resphf httpheader.ResponseHeader, body []byte) error
+	ApplyRequestMiddlewares(reqhf httpheader.RequestHeader) error
 }
 
 type httpWriter struct {
@@ -27,8 +28,8 @@ type httpWriter struct {
 	reader     io.Reader
 	headerBuf  []byte
 	buf        []byte
-	respHeader ResponseHeader
-	reqHeader  RequestHeader
+	respHeader httpheader.ResponseHeader
+	reqHeader  httpheader.RequestHeader
 	respMW     []ResponseMiddleware
 	reqMW      []RequestMiddleware
 }
@@ -49,7 +50,7 @@ func (hw *httpWriter) UseRequestMiddleware(mw RequestMiddleware) {
 	hw.reqMW = append(hw.reqMW, mw)
 }
 
-func (hw *httpWriter) SetRequestHeader(header RequestHeader) {
+func (hw *httpWriter) SetRequestHeader(header httpheader.RequestHeader) {
 	hw.reqHeader = header
 }
 
@@ -107,7 +108,7 @@ func (hw *httpWriter) splitHeaderAndBody(data []byte, delimiterIdx int) ([]byte,
 }
 
 func (hw *httpWriter) processHTTPRequest(p, header, body []byte) (int, error) {
-	reqhf, err := NewRequestHeader(header)
+	reqhf, err := httpheader.NewRequestHeader(header)
 	if err != nil {
 		return 0, err
 	}
@@ -121,7 +122,7 @@ func (hw *httpWriter) processHTTPRequest(p, header, body []byte) (int, error) {
 	return copy(p, combined), nil
 }
 
-func (hw *httpWriter) ApplyRequestMiddlewares(reqhf RequestHeader) error {
+func (hw *httpWriter) ApplyRequestMiddlewares(reqhf httpheader.RequestHeader) error {
 	for _, m := range hw.RequestMiddlewares() {
 		if err := m.HandleRequest(reqhf); err != nil {
 			log.Printf("Error when applying request middleware: %v", err)
@@ -180,7 +181,7 @@ func (hw *httpWriter) writeRawBuffer() (int, error) {
 }
 
 func (hw *httpWriter) processHTTPResponse(header, body []byte) error {
-	resphf, err := NewResponseHeader(header)
+	resphf, err := httpheader.NewResponseHeader(header)
 	if err != nil {
 		return err
 	}
@@ -199,7 +200,7 @@ func (hw *httpWriter) processHTTPResponse(header, body []byte) error {
 	return nil
 }
 
-func (hw *httpWriter) ApplyResponseMiddlewares(resphf ResponseHeader, body []byte) error {
+func (hw *httpWriter) ApplyResponseMiddlewares(resphf httpheader.ResponseHeader, body []byte) error {
 	for _, m := range hw.ResponseMiddlewares() {
 		if err := m.HandleResponse(resphf, body); err != nil {
 			log.Printf("Cannot apply middleware: %s\n", err)

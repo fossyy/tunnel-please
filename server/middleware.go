@@ -2,14 +2,15 @@ package server
 
 import (
 	"net"
+	"tunnel_pls/internal/httpheader"
 )
 
 type RequestMiddleware interface {
-	HandleRequest(header RequestHeader) error
+	HandleRequest(header httpheader.RequestHeader) error
 }
 
 type ResponseMiddleware interface {
-	HandleResponse(header ResponseHeader, body []byte) error
+	HandleResponse(header httpheader.ResponseHeader, body []byte) error
 }
 
 type TunnelFingerprint struct{}
@@ -18,7 +19,7 @@ func NewTunnelFingerprint() *TunnelFingerprint {
 	return &TunnelFingerprint{}
 }
 
-func (h *TunnelFingerprint) HandleResponse(header ResponseHeader, body []byte) error {
+func (h *TunnelFingerprint) HandleResponse(header httpheader.ResponseHeader, body []byte) error {
 	header.Set("Server", "Tunnel Please")
 	return nil
 }
@@ -31,7 +32,7 @@ func NewForwardedFor(addr net.Addr) *ForwardedFor {
 	return &ForwardedFor{addr: addr}
 }
 
-func (ff *ForwardedFor) HandleRequest(header RequestHeader) error {
+func (ff *ForwardedFor) HandleRequest(header httpheader.RequestHeader) error {
 	host, _, err := net.SplitHostPort(ff.addr.String())
 	if err != nil {
 		return err

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 	"tunnel_pls/internal/config"
+	"tunnel_pls/internal/httpheader"
 	"tunnel_pls/session"
 	"tunnel_pls/types"
 
@@ -112,7 +113,7 @@ func (hs *httpServer) handler(conn net.Conn, isTLS bool) {
 	defer hs.closeConnection(conn)
 
 	dstReader := bufio.NewReader(conn)
-	reqhf, err := NewRequestHeader(dstReader)
+	reqhf, err := httpheader.NewRequestHeader(dstReader)
 	if err != nil {
 		log.Printf("Error creating request header: %v", err)
 		return
@@ -150,7 +151,7 @@ func (hs *httpServer) closeConnection(conn net.Conn) {
 	}
 }
 
-func (hs *httpServer) extractSlug(reqhf RequestHeader) (string, error) {
+func (hs *httpServer) extractSlug(reqhf httpheader.RequestHeader) (string, error) {
 	host := strings.Split(reqhf.Value("Host"), ".")
 	if len(host) < 1 {
 		return "", errors.New("invalid host")
@@ -193,7 +194,7 @@ func (hs *httpServer) getSession(slug string) (session.Session, error) {
 	return sshSession, nil
 }
 
-func (hs *httpServer) forwardRequest(hw HTTPWriter, initialRequest RequestHeader, sshSession session.Session) {
+func (hs *httpServer) forwardRequest(hw HTTPWriter, initialRequest httpheader.RequestHeader, sshSession session.Session) {
 	channel, err := hs.openForwardedChannel(hw, sshSession)
 	if err != nil {
 		log.Printf("Failed to establish channel: %v", err)
@@ -260,7 +261,7 @@ func (hs *httpServer) setupMiddlewares(hw HTTPWriter) {
 	hw.UseRequestMiddleware(forwardedForMiddleware)
 }
 
-func (hs *httpServer) sendInitialRequest(hw HTTPWriter, initialRequest RequestHeader, channel ssh.Channel) error {
+func (hs *httpServer) sendInitialRequest(hw HTTPWriter, initialRequest httpheader.RequestHeader, channel ssh.Channel) error {
 	hw.SetRequestHeader(initialRequest)
 
 	if err := hw.ApplyRequestMiddlewares(initialRequest); err != nil {
