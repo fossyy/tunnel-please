@@ -5,11 +5,11 @@ import (
 )
 
 type RequestMiddleware interface {
-	HandleRequest(header RequestHeaderManager) error
+	HandleRequest(header RequestHeader) error
 }
 
 type ResponseMiddleware interface {
-	HandleResponse(header ResponseHeaderManager, body []byte) error
+	HandleResponse(header ResponseHeader, body []byte) error
 }
 
 type TunnelFingerprint struct{}
@@ -18,7 +18,7 @@ func NewTunnelFingerprint() *TunnelFingerprint {
 	return &TunnelFingerprint{}
 }
 
-func (h *TunnelFingerprint) HandleResponse(header ResponseHeaderManager, body []byte) error {
+func (h *TunnelFingerprint) HandleResponse(header ResponseHeader, body []byte) error {
 	header.Set("Server", "Tunnel Please")
 	return nil
 }
@@ -31,7 +31,7 @@ func NewForwardedFor(addr net.Addr) *ForwardedFor {
 	return &ForwardedFor{addr: addr}
 }
 
-func (ff *ForwardedFor) HandleRequest(header RequestHeaderManager) error {
+func (ff *ForwardedFor) HandleRequest(header RequestHeader) error {
 	host, _, err := net.SplitHostPort(ff.addr.String())
 	if err != nil {
 		return err

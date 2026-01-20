@@ -6,22 +6,20 @@ import (
 	"fmt"
 )
 
-type HeaderManager interface {
-	Get(key string) []byte
-	Set(key string, value []byte)
-	Remove(key string)
-	Finalize() []byte
-}
-
-type ResponseHeaderManager interface {
-	Get(key string) string
+type ResponseHeader interface {
+	Value(key string) string
 	Set(key string, value string)
 	Remove(key string)
 	Finalize() []byte
 }
 
-type RequestHeaderManager interface {
-	Get(key string) string
+type responseHeader struct {
+	startLine []byte
+	headers   map[string]string
+}
+
+type RequestHeader interface {
+	Value(key string) string
 	Set(key string, value string)
 	Remove(key string)
 	Finalize() []byte
@@ -29,13 +27,7 @@ type RequestHeaderManager interface {
 	GetPath() string
 	GetVersion() string
 }
-
-type responseHeaderFactory struct {
-	startLine []byte
-	headers   map[string]string
-}
-
-type requestHeaderFactory struct {
+type requestHeader struct {
 	method    string
 	path      string
 	version   string
@@ -43,7 +35,7 @@ type requestHeaderFactory struct {
 	headers   map[string]string
 }
 
-func NewRequestHeaderFactory(r interface{}) (RequestHeaderManager, error) {
+func NewRequestHeader(r interface{}) (RequestHeader, error) {
 	switch v := r.(type) {
 	case []byte:
 		return parseHeadersFromBytes(v)
@@ -54,38 +46,16 @@ func NewRequestHeaderFactory(r interface{}) (RequestHeaderManager, error) {
 	}
 }
 
-func parseHeadersFromBytes(headerData []byte) (RequestHeaderManager, error) {
-	header := &requestHeaderFactory{
-		headers: make(map[string]string, 16),
-	}
-
-	lineEnd := bytes.IndexByte(headerData, '\n')
-	if lineEnd == -1 {
-		return nil, fmt.Errorf("invalid request: no newline found")
-	}
-
-	startLine := bytes.TrimRight(headerData[:lineEnd], "\r\n")
-	header.startLine = make([]byte, len(startLine))
-	copy(header.startLine, startLine)
-
-	parts := bytes.Split(startLine, []byte{' '})
-	if len(parts) < 3 {
-		return nil, fmt.Errorf("invalid request line")
-	}
-
-	header.method = string(parts[0])
-	header.path = string(parts[1])
-	header.version = string(parts[2])
-
-	remaining := headerData[lineEnd+1:]
-
+func setRemainingHeaders(remaining []byte, header interface {
+	Set(key string, value string)
+}) {
 	for len(remaining) > 0 {
-		lineEnd = bytes.IndexByte(remaining, '\n')
+		lineEnd := bytes.Index(remaining, []byte("\r\n"))
 		if lineEnd == -1 {
 			lineEnd = len(remaining)
 		}
 
-		line := bytes.TrimRight(remaining[:lineEnd], "\r\n")
+		line := remaining[:lineEnd]
 
 		if len(line) == 0 {
 			break
@@ -95,63 +65,84 @@ func parseHeadersFromBytes(headerData []byte) (RequestHeaderManager, error) {
 		if colonIdx != -1 {
 			key := bytes.TrimSpace(line[:colonIdx])
 			value := bytes.TrimSpace(line[colonIdx+1:])
-			header.headers[string(key)] = string(value)
+			header.Set(string(key), string(value))
 		}
 
 		if lineEnd == len(remaining) {
 			break
 		}
-		remaining = remaining[lineEnd+1:]
+
+		remaining = remaining[lineEnd+2:]
 	}
+}
+
+func parseHeadersFromBytes(headerData []byte) (RequestHeader, error) {
+	header := &requestHeader{
+		headers: make(map[string]string, 16),
+	}
+
+	lineEnd := bytes.Index(headerData, []byte("\r\n"))
+	if lineEnd == -1 {
+		return nil, fmt.Errorf("invalid request: no CRLF found in start line")
+	}
+
+	startLine := headerData[:lineEnd]
+	header.startLine = startLine
+	var err error
+	header.method, header.path, header.version, err = parseStartLine(startLine)
+	if err != nil {
+		return nil, err
+	}
+
+	remaining := headerData[lineEnd+2:]
+
+	setRemainingHeaders(remaining, header)
 
 	return header, nil
 }
 
-func parseHeadersFromReader(br *bufio.Reader) (RequestHeaderManager, error) {
-	header := &requestHeaderFactory{
+func parseStartLine(startLine []byte) (method, path, version string, err error) {
+	firstSpace := bytes.IndexByte(startLine, ' ')
+	if firstSpace == -1 {
+		return "", "", "", fmt.Errorf("invalid start line: missing method")
+	}
+
+	secondSpace := bytes.IndexByte(startLine[firstSpace+1:], ' ')
+	if secondSpace == -1 {
+		return "", "", "", fmt.Errorf("invalid start line: missing version")
+	}
+	secondSpace += firstSpace + 1
+
+	method = string(startLine[:firstSpace])
+	path = string(startLine[firstSpace+1 : secondSpace])
+	version = string(startLine[secondSpace+1:])
+
+	return method, path, version, nil
+}
+
+func parseHeadersFromReader(br *bufio.Reader) (RequestHeader, error) {
+	header := &requestHeader{
 		headers: make(map[string]string, 16),
 	}
 
 	startLineBytes, err := br.ReadSlice('\n')
 	if err != nil {
-		if err == bufio.ErrBufferFull {
-			var startLine string
-			startLine, err = br.ReadString('\n')
-			if err != nil {
-				return nil, err
-			}
-			startLineBytes = []byte(startLine)
-		} else {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	startLineBytes = bytes.TrimRight(startLineBytes, "\r\n")
 	header.startLine = make([]byte, len(startLineBytes))
 	copy(header.startLine, startLineBytes)
 
-	parts := bytes.Split(startLineBytes, []byte{' '})
-	if len(parts) < 3 {
-		return nil, fmt.Errorf("invalid request line")
+	header.method, header.path, header.version, err = parseStartLine(header.startLine)
+	if err != nil {
+		return nil, err
 	}
-
-	header.method = string(parts[0])
-	header.path = string(parts[1])
-	header.version = string(parts[2])
 
 	for {
 		lineBytes, err := br.ReadSlice('\n')
 		if err != nil {
-			if err == bufio.ErrBufferFull {
-				var line string
-				line, err = br.ReadString('\n')
-				if err != nil {
-					return nil, err
-				}
-				lineBytes = []byte(line)
-			} else {
-				return nil, err
-			}
+			return nil, err
 		}
 
 		lineBytes = bytes.TrimRight(lineBytes, "\r\n")
@@ -174,63 +165,63 @@ func parseHeadersFromReader(br *bufio.Reader) (RequestHeaderManager, error) {
 	return header, nil
 }
 
-func NewResponseHeaderFactory(startLine []byte) ResponseHeaderManager {
-	header := &responseHeaderFactory{
+func NewResponseHeader(headerData []byte) (ResponseHeader, error) {
+	header := &responseHeader{
 		startLine: nil,
-		headers:   make(map[string]string),
+		headers:   make(map[string]string, 16),
 	}
-	lines := bytes.Split(startLine, []byte("\r\n"))
-	if len(lines) == 0 {
-		return header
-	}
-	header.startLine = lines[0]
-	for _, h := range lines[1:] {
-		if len(h) == 0 {
-			continue
-		}
 
-		parts := bytes.SplitN(h, []byte(":"), 2)
-		if len(parts) < 2 {
-			continue
-		}
-
-		key := parts[0]
-		val := bytes.TrimSpace(parts[1])
-		header.headers[string(key)] = string(val)
+	lineEnd := bytes.Index(headerData, []byte("\r\n"))
+	if lineEnd == -1 {
+		return nil, fmt.Errorf("invalid request: no CRLF found in start line")
 	}
-	return header
+
+	header.startLine = headerData[:lineEnd]
+	remaining := headerData[lineEnd+2:]
+	setRemainingHeaders(remaining, header)
+
+	return header, nil
 }
 
-func (resp *responseHeaderFactory) Get(key string) string {
+func (resp *responseHeader) Value(key string) string {
 	return resp.headers[key]
 }
 
-func (resp *responseHeaderFactory) Set(key string, value string) {
+func (resp *responseHeader) Set(key string, value string) {
 	resp.headers[key] = value
 }
 
-func (resp *responseHeaderFactory) Remove(key string) {
+func (resp *responseHeader) Remove(key string) {
 	delete(resp.headers, key)
 }
 
-func (resp *responseHeaderFactory) Finalize() []byte {
-	var buf bytes.Buffer
+func finalize(startLine []byte, headers map[string]string) []byte {
+	size := len(startLine) + 2
+	for key, val := range headers {
+		size += len(key) + 2 + len(val) + 2
+	}
+	size += 2
 
-	buf.Write(resp.startLine)
-	buf.WriteString("\r\n")
+	buf := make([]byte, 0, size)
+	buf = append(buf, startLine...)
+	buf = append(buf, '\r', '\n')
 
-	for key, val := range resp.headers {
-		buf.WriteString(key)
-		buf.WriteString(": ")
-		buf.WriteString(val)
-		buf.WriteString("\r\n")
+	for key, val := range headers {
+		buf = append(buf, key...)
+		buf = append(buf, ':', ' ')
+		buf = append(buf, val...)
+		buf = append(buf, '\r', '\n')
 	}
 
-	buf.WriteString("\r\n")
-	return buf.Bytes()
+	buf = append(buf, '\r', '\n')
+	return buf
 }
 
-func (req *requestHeaderFactory) Get(key string) string {
+func (resp *responseHeader) Finalize() []byte {
+	return finalize(resp.startLine, resp.headers)
+}
+
+func (req *requestHeader) Value(key string) string {
 	val, ok := req.headers[key]
 	if !ok {
 		return ""
@@ -238,39 +229,26 @@ func (req *requestHeaderFactory) Get(key string) string {
 	return val
 }
 
-func (req *requestHeaderFactory) Set(key string, value string) {
+func (req *requestHeader) Set(key string, value string) {
 	req.headers[key] = value
 }
 
-func (req *requestHeaderFactory) Remove(key string) {
+func (req *requestHeader) Remove(key string) {
 	delete(req.headers, key)
 }
 
-func (req *requestHeaderFactory) GetMethod() string {
+func (req *requestHeader) GetMethod() string {
 	return req.method
 }
 
-func (req *requestHeaderFactory) GetPath() string {
+func (req *requestHeader) GetPath() string {
 	return req.path
 }
 
-func (req *requestHeaderFactory) GetVersion() string {
+func (req *requestHeader) GetVersion() string {
 	return req.version
 }
 
-func (req *requestHeaderFactory) Finalize() []byte {
-	var buf bytes.Buffer
-
-	buf.Write(req.startLine)
-	buf.WriteString("\r\n")
-
-	for key, val := range req.headers {
-		buf.WriteString(key)
-		buf.WriteString(": ")
-		buf.WriteString(val)
-		buf.WriteString("\r\n")
-	}
-
-	buf.WriteString("\r\n")
-	return buf.Bytes()
+func (req *requestHeader) Finalize() []byte {
+	return finalize(req.startLine, req.headers)
 }

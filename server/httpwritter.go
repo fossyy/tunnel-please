@@ -14,11 +14,11 @@ type HTTPWriter interface {
 	RemoteAddr() net.Addr
 	UseResponseMiddleware(mw ResponseMiddleware)
 	UseRequestMiddleware(mw RequestMiddleware)
-	SetRequestHeader(header RequestHeaderManager)
+	SetRequestHeader(header RequestHeader)
 	RequestMiddlewares() []RequestMiddleware
 	ResponseMiddlewares() []ResponseMiddleware
-	ApplyResponseMiddlewares(resphf ResponseHeaderManager, body []byte) error
-	ApplyRequestMiddlewares(reqhf RequestHeaderManager) error
+	ApplyResponseMiddlewares(resphf ResponseHeader, body []byte) error
+	ApplyRequestMiddlewares(reqhf RequestHeader) error
 }
 
 type httpWriter struct {
@@ -27,8 +27,8 @@ type httpWriter struct {
 	reader     io.Reader
 	headerBuf  []byte
 	buf        []byte
-	respHeader ResponseHeaderManager
-	reqHeader  RequestHeaderManager
+	respHeader ResponseHeader
+	reqHeader  RequestHeader
 	respMW     []ResponseMiddleware
 	reqMW      []RequestMiddleware
 }
@@ -49,7 +49,7 @@ func (hw *httpWriter) UseRequestMiddleware(mw RequestMiddleware) {
 	hw.reqMW = append(hw.reqMW, mw)
 }
 
-func (hw *httpWriter) SetRequestHeader(header RequestHeaderManager) {
+func (hw *httpWriter) SetRequestHeader(header RequestHeader) {
 	hw.reqHeader = header
 }
 
@@ -107,7 +107,7 @@ func (hw *httpWriter) splitHeaderAndBody(data []byte, delimiterIdx int) ([]byte,
 }
 
 func (hw *httpWriter) processHTTPRequest(p, header, body []byte) (int, error) {
-	reqhf, err := NewRequestHeaderFactory(header)
+	reqhf, err := NewRequestHeader(header)
 	if err != nil {
 		return 0, err
 	}
@@ -121,7 +121,7 @@ func (hw *httpWriter) processHTTPRequest(p, header, body []byte) (int, error) {
 	return copy(p, combined), nil
 }
 
-func (hw *httpWriter) ApplyRequestMiddlewares(reqhf RequestHeaderManager) error {
+func (hw *httpWriter) ApplyRequestMiddlewares(reqhf RequestHeader) error {
 	for _, m := range hw.RequestMiddlewares() {
 		if err := m.HandleRequest(reqhf); err != nil {
 			log.Printf("Error when applying request middleware: %v", err)
@@ -180,23 +180,26 @@ func (hw *httpWriter) writeRawBuffer() (int, error) {
 }
 
 func (hw *httpWriter) processHTTPResponse(header, body []byte) error {
-	resphf := NewResponseHeaderFactory(header)
+	resphf, err := NewResponseHeader(header)
+	if err != nil {
+		return err
+	}
 
-	if err := hw.ApplyResponseMiddlewares(resphf, body); err != nil {
+	if err = hw.ApplyResponseMiddlewares(resphf, body); err != nil {
 		return err
 	}
 
 	hw.respHeader = resphf
 	finalHeader := resphf.Finalize()
 
-	if err := hw.writeHeaderAndBody(finalHeader, body); err != nil {
+	if err = hw.writeHeaderAndBody(finalHeader, body); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (hw *httpWriter) ApplyResponseMiddlewares(resphf ResponseHeaderManager, body []byte) error {
+func (hw *httpWriter) ApplyResponseMiddlewares(resphf ResponseHeader, body []byte) error {
 	for _, m := range hw.ResponseMiddlewares() {
 		if err := m.HandleResponse(resphf, body); err != nil {
 			log.Printf("Cannot apply middleware: %s\n", err)
