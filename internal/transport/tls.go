@@ -67,7 +67,7 @@ func NewTLSConfig(config config.Config) (*tls.Config, error) {
 			tm.useCertMagic = false
 			tm.startCertWatcher()
 		} else {
-			log.Printf("User certificates missing or don't cover %s and *.%s, using CertMagic", config.Domain, config.Domain)
+			log.Printf("User certificates missing or don't cover %s and *.%s, using CertMagic", config.Domain(), config.Domain())
 			if err := tm.initCertMagic(); err != nil {
 				initErr = fmt.Errorf("failed to initialize CertMagic: %w", err)
 				return

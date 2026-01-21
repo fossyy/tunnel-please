@@ -34,6 +34,15 @@ type registry struct {
 	slugIndex map[Key]string
 }
 
+var (
+	ErrSessionNotFound      = fmt.Errorf("session not found")
+	ErrSlugInUse            = fmt.Errorf("slug already in use")
+	ErrInvalidSlug          = fmt.Errorf("invalid slug")
+	ErrForbiddenSlug        = fmt.Errorf("forbidden slug")
+	ErrSlugChangeNotAllowed = fmt.Errorf("slug change not allowed for this tunnel type")
+	ErrSlugUnchanged        = fmt.Errorf("slug is unchanged")
+)
+
 func NewRegistry() Registry {
 	return &registry{
 		byUser:    make(map[string]map[Key]Session),
@@ -47,12 +56,12 @@ func (r *registry) Get(key Key) (session Session, err error) {
 
 	userID, ok := r.slugIndex[key]
 	if !ok {
-		return nil, fmt.Errorf("session not found")
+		return nil, ErrSessionNotFound
 	}
 
 	client, ok := r.byUser[userID][key]
 	if !ok {
-		return nil, fmt.Errorf("session not found")
+		return nil, ErrSessionNotFound
 	}
 	return client, nil
 }
@@ -63,37 +72,37 @@ func (r *registry) GetWithUser(user string, key Key) (session Session, err error
 
 	client, ok := r.byUser[user][key]
 	if !ok {
-		return nil, fmt.Errorf("session not found")
+		return nil, ErrSessionNotFound
 	}
 	return client, nil
 }
 
 func (r *registry) Update(user string, oldKey, newKey Key) error {
 	if oldKey.Type != newKey.Type {
-		return fmt.Errorf("tunnel type cannot change")
+		return ErrSlugUnchanged
 	}
 
 	if newKey.Type != types.TunnelTypeHTTP {
-		return fmt.Errorf("non http tunnel cannot change slug")
+		return ErrSlugChangeNotAllowed
 	}
 
 	if isForbiddenSlug(newKey.Id) {
-		return fmt.Errorf("this subdomain is reserved. Please choose a different one")
+		return ErrForbiddenSlug
 	}
 
 	if !isValidSlug(newKey.Id) {
-		return fmt.Errorf("invalid subdomain. Follow the rules")
+		return ErrInvalidSlug
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if _, exists := r.slugIndex[newKey]; exists && newKey != oldKey {
-		return fmt.Errorf("someone already uses this subdomain")
+		return ErrSlugInUse
 	}
 	client, ok := r.byUser[user][oldKey]
 	if !ok {
-		return fmt.Errorf("session not found")
+		return ErrSessionNotFound
 	}
 
 	delete(r.byUser[user], oldKey)

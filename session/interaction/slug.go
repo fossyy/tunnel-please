@@ -145,9 +145,9 @@ func (m *model) slugView() string {
 
 		var warningText string
 		if isVeryCompact {
-			warningText = "⚠️ TunnelTypeTCP tunnels don't support custom subdomains."
+			warningText = "⚠️ TCP tunnels don't support custom subdomains."
 		} else {
-			warningText = "⚠️ TunnelTypeTCP tunnels cannot have custom subdomains. Only TunnelTypeHTTP/HTTPS tunnels support subdomain customization."
+			warningText = "⚠️ TCP tunnels cannot have custom subdomains. Only HTTP/HTTPS tunnels support subdomain customization."
 		}
 		b.WriteString(warningBoxStyle.Render(warningText))
 		b.WriteString("\n\n")

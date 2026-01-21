@@ -160,7 +160,7 @@ func (s *session) setupInteractiveMode(channel ssh.NewChannel) error {
 }
 
 func (s *session) handleMissingForwardRequest() error {
-	err := s.interaction.Send(fmt.Sprintf("PortRegistry forwarding request not received. Ensure you ran the correct command with -R flag. Example: ssh %s -p %s -R 80:localhost:3000", s.config.Domain, s.config.SSHPort))
+	err := s.interaction.Send(fmt.Sprintf("PortRegistry forwarding request not received. Ensure you ran the correct command with -R flag. Example: ssh %s -p %s -R 80:localhost:3000", s.config.Domain(), s.config.SSHPort()))
 	if err != nil {
 		return err
 	}

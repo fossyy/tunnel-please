@@ -44,7 +44,7 @@ type Detail struct {
 	StartedAt      time.Time `json:"started_at,omitempty"`
 }
 
-var BadGatewayResponse = []byte("TunnelTypeHTTP/1.1 502 Bad Gateway\r\n" +
+var BadGatewayResponse = []byte("HTTP/1.1 502 Bad Gateway\r\n" +
 	"Content-Length: 11\r\n" +
 	"Content-Type: text/plain\r\n\r\n" +
 	"Bad Gateway")

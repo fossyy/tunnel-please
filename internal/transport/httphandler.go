@@ -34,7 +34,7 @@ func newHTTPHandler(domain string, sessionRegistry registry.Registry, redirectTL
 }
 
 func (hh *httpHandler) redirect(conn net.Conn, status int, location string) error {
-	_, err := conn.Write([]byte(fmt.Sprintf("TunnelTypeHTTP/1.1 %d Moved Permanently\r\n", status) +
+	_, err := conn.Write([]byte(fmt.Sprintf("HTTP/1.1 %d Moved Permanently\r\n", status) +
 		fmt.Sprintf("Location: %s", location) +
 		"Content-Length: 0\r\n" +
 		"Connection: close\r\n" +
@@ -46,7 +46,7 @@ func (hh *httpHandler) redirect(conn net.Conn, status int, location string) erro
 }
 
 func (hh *httpHandler) badRequest(conn net.Conn) error {
-	if _, err := conn.Write([]byte("TunnelTypeHTTP/1.1 400 Bad Request\r\n\r\n")); err != nil {
+	if _, err := conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n")); err != nil {
 		return err
 	}
 	return nil
@@ -87,7 +87,7 @@ func (hh *httpHandler) handler(conn net.Conn, isTLS bool) {
 	defer func(hw stream.HTTP) {
 		err = hw.Close()
 		if err != nil {
-			log.Printf("Error closing TunnelTypeHTTP stream: %v", err)
+			log.Printf("Error closing HTTP stream: %v", err)
 		}
 	}(hw)
 	hh.forwardRequest(hw, reqhf, sshSession)
@@ -118,7 +118,7 @@ func (hh *httpHandler) handlePingRequest(slug string, conn net.Conn) bool {
 	}
 
 	_, err := conn.Write([]byte(
-		"TunnelTypeHTTP/1.1 200 OK\r\n" +
+		"HTTP/1.1 200 OK\r\n" +
 			"Content-Length: 0\r\n" +
 			"Connection: close\r\n" +
 			"Access-Control-Allow-Origin: *\r\n" +
