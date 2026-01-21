@@ -2,26 +2,33 @@ package types
 
 import "time"
 
-type Status int
+type SessionStatus int
 
 const (
-	INITIALIZING Status = iota
-	RUNNING
+	SessionStatusINITIALIZING SessionStatus = iota
+	SessionStatusRUNNING
 )
 
-type Mode int
+type InteractiveMode int
 
 const (
-	INTERACTIVE Mode = iota
-	HEADLESS
+	InteractiveModeINTERACTIVE InteractiveMode = iota + 1
+	InteractiveModeHEADLESS
 )
 
 type TunnelType int
 
 const (
-	UNKNOWN TunnelType = iota
-	HTTP
-	TCP
+	TunnelTypeUNKNOWN TunnelType = iota
+	TunnelTypeHTTP
+	TunnelTypeTCP
+)
+
+type ServerMode int
+
+const (
+	ServerModeSTANDALONE = iota + 1
+	ServerModeNODE
 )
 
 type SessionKey struct {

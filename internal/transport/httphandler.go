@@ -4,12 +4,12 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"strings"
 	"time"
-	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/http/header"
 	"tunnel_pls/internal/http/stream"
 	"tunnel_pls/internal/middleware"
@@ -20,12 +20,14 @@ import (
 )
 
 type httpHandler struct {
+	domain          string
 	sessionRegistry registry.Registry
 	redirectTLS     bool
 }
 
-func newHTTPHandler(sessionRegistry registry.Registry, redirectTLS bool) *httpHandler {
+func newHTTPHandler(domain string, sessionRegistry registry.Registry, redirectTLS bool) *httpHandler {
 	return &httpHandler{
+		domain:          domain,
 		sessionRegistry: sessionRegistry,
 		redirectTLS:     redirectTLS,
 	}
@@ -67,7 +69,7 @@ func (hh *httpHandler) handler(conn net.Conn, isTLS bool) {
 	}
 
 	if hh.shouldRedirectToTLS(isTLS) {
-		_ = hh.redirect(conn, http.StatusMovedPermanently, fmt.Sprintf("Location: https://%s.%s/\r\n", slug, config.Getenv("DOMAIN", "localhost")))
+		_ = hh.redirect(conn, http.StatusMovedPermanently, fmt.Sprintf("Location: https://%s.%s/\r\n", slug, hh.domain))
 		return
 	}
 
@@ -133,7 +135,7 @@ func (hh *httpHandler) handlePingRequest(slug string, conn net.Conn) bool {
 func (hh *httpHandler) getSession(slug string) (registry.Session, error) {
 	sshSession, err := hh.sessionRegistry.Get(types.SessionKey{
 		Id:   slug,
-		Type: types.HTTP,
+		Type: types.TunnelTypeHTTP,
 	})
 	if err != nil {
 		return nil, err
@@ -143,17 +145,19 @@ func (hh *httpHandler) getSession(slug string) (registry.Session, error) {
 
 func (hh *httpHandler) forwardRequest(hw stream.HTTP, initialRequest header.RequestHeader, sshSession registry.Session) {
 	channel, err := hh.openForwardedChannel(hw, sshSession)
-	defer func() {
-		err = channel.Close()
-		if err != nil {
-			log.Printf("Error closing forwarded channel: %v", err)
-		}
-	}()
 	if err != nil {
 		log.Printf("Failed to establish channel: %v", err)
 		sshSession.Forwarder().WriteBadGatewayResponse(hw)
 		return
 	}
+
+	defer func() {
+		err = channel.Close()
+		if err != nil && !errors.Is(err, io.EOF) {
+			log.Printf("Error closing forwarded channel: %v", err)
+		}
+	}()
+
 	hh.setupMiddlewares(hw)
 
 	if err = hh.sendInitialRequest(hw, initialRequest, channel); err != nil {

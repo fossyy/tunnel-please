@@ -26,7 +26,8 @@ type TLSManager interface {
 }
 
 type tlsManager struct {
-	domain      string
+	config config.Config
+
 	certPath    string
 	keyPath     string
 	storagePath string
@@ -42,7 +43,7 @@ type tlsManager struct {
 var globalTLSManager TLSManager
 var tlsManagerOnce sync.Once
 
-func NewTLSConfig(domain string) (*tls.Config, error) {
+func NewTLSConfig(config config.Config) (*tls.Config, error) {
 	var initErr error
 
 	tlsManagerOnce.Do(func() {
@@ -51,7 +52,7 @@ func NewTLSConfig(domain string) (*tls.Config, error) {
 		storagePath := "certs/tls/certmagic"
 
 		tm := &tlsManager{
-			domain:      domain,
+			config:      config,
 			certPath:    certPath,
 			keyPath:     keyPath,
 			storagePath: storagePath,
@@ -66,14 +67,7 @@ func NewTLSConfig(domain string) (*tls.Config, error) {
 			tm.useCertMagic = false
 			tm.startCertWatcher()
 		} else {
-			if !isACMEConfigComplete() {
-				log.Printf("User certificates missing or invalid, and ACME configuration is incomplete")
-				log.Printf("To enable automatic certificate generation, set CF_API_TOKEN environment variable")
-				initErr = fmt.Errorf("no valid certificates found and ACME configuration is incomplete (CF_API_TOKEN is required)")
-				return
-			}
-
-			log.Printf("User certificates missing or don't cover %s and *.%s, using CertMagic", domain, domain)
+			log.Printf("User certificates missing or don't cover %s and *.%s, using CertMagic", config.Domain(), config.Domain())
 			if err := tm.initCertMagic(); err != nil {
 				initErr = fmt.Errorf("failed to initialize CertMagic: %w", err)
 				return
@@ -91,11 +85,6 @@ func NewTLSConfig(domain string) (*tls.Config, error) {
 	return globalTLSManager.getTLSConfig(), nil
 }
 
-func isACMEConfigComplete() bool {
-	cfAPIToken := config.Getenv("CF_API_TOKEN", "")
-	return cfAPIToken != ""
-}
-
 func (tm *tlsManager) userCertsExistAndValid() bool {
 	if _, err := os.Stat(tm.certPath); os.IsNotExist(err) {
 		log.Printf("Certificate file not found: %s", tm.certPath)
@@ -106,7 +95,7 @@ func (tm *tlsManager) userCertsExistAndValid() bool {
 		return false
 	}
 
-	return ValidateCertDomains(tm.certPath, tm.domain)
+	return ValidateCertDomains(tm.certPath, tm.config.Domain())
 }
 
 func ValidateCertDomains(certPath, domain string) bool {
@@ -206,15 +195,9 @@ func (tm *tlsManager) startCertWatcher() {
 			if certInfo.ModTime().After(lastCertMod) || keyInfo.ModTime().After(lastKeyMod) {
 				log.Printf("Certificate files changed, reloading...")
 
-				if !ValidateCertDomains(tm.certPath, tm.domain) {
+				if !ValidateCertDomains(tm.certPath, tm.config.Domain()) {
 					log.Printf("New certificates don't cover required domains")
 
-					if !isACMEConfigComplete() {
-						log.Printf("Cannot switch to CertMagic: ACME configuration is incomplete (CF_API_TOKEN is required)")
-						continue
-					}
-
-					log.Printf("Switching to CertMagic for automatic certificate management")
 					if err := tm.initCertMagic(); err != nil {
 						log.Printf("Failed to initialize CertMagic: %v", err)
 						continue
@@ -241,16 +224,12 @@ func (tm *tlsManager) initCertMagic() error {
 		return fmt.Errorf("failed to create cert storage directory: %w", err)
 	}
 
-	acmeEmail := config.Getenv("ACME_EMAIL", "admin@"+tm.domain)
-	cfAPIToken := config.Getenv("CF_API_TOKEN", "")
-	acmeStaging := config.Getenv("ACME_STAGING", "false") == "true"
-
-	if cfAPIToken == "" {
+	if tm.config.CFAPIToken() == "" {
 		return fmt.Errorf("CF_API_TOKEN environment variable is required for automatic certificate generation")
 	}
 
 	cfProvider := &cloudflare.Provider{
-		APIToken: cfAPIToken,
+		APIToken: tm.config.CFAPIToken(),
 	}
 
 	storage := &certmagic.FileStorage{Path: tm.storagePath}
@@ -266,7 +245,7 @@ func (tm *tlsManager) initCertMagic() error {
 	})
 
 	acmeIssuer := certmagic.NewACMEIssuer(magic, certmagic.ACMEIssuer{
-		Email:  acmeEmail,
+		Email:  tm.config.ACMEEmail(),
 		Agreed: true,
 		DNS01Solver: &certmagic.DNS01Solver{
 			DNSManager: certmagic.DNSManager{
@@ -275,7 +254,7 @@ func (tm *tlsManager) initCertMagic() error {
 		},
 	})
 
-	if acmeStaging {
+	if tm.config.ACMEStaging() {
 		acmeIssuer.CA = certmagic.LetsEncryptStagingCA
 		log.Printf("Using Let's Encrypt staging server")
 	} else {
@@ -286,7 +265,7 @@ func (tm *tlsManager) initCertMagic() error {
 	magic.Issuers = []certmagic.Issuer{acmeIssuer}
 	tm.magic = magic
 
-	domains := []string{tm.domain, "*." + tm.domain}
+	domains := []string{tm.config.Domain(), "*." + tm.config.Domain()}
 	log.Printf("Requesting certificates for: %v", domains)
 
 	ctx := context.Background()

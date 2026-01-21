@@ -17,9 +17,9 @@ type RequestHeader interface {
 	Set(key string, value string)
 	Remove(key string)
 	Finalize() []byte
-	GetMethod() string
-	GetPath() string
-	GetVersion() string
+	Method() string
+	Path() string
+	Version() string
 }
 type requestHeader struct {
 	method    string

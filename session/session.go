@@ -37,6 +37,7 @@ type Session interface {
 }
 
 type session struct {
+	config      config.Config
 	initialReq  <-chan *ssh.Request
 	sshChan     <-chan ssh.NewChannel
 	lifecycle   lifecycle.Lifecycle
@@ -48,13 +49,14 @@ type session struct {
 
 var blockedReservedPorts = []uint16{1080, 1433, 1521, 1900, 2049, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 9000, 9200, 27017}
 
-func New(conn *ssh.ServerConn, initialReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel, sessionRegistry registry.Registry, portRegistry portUtil.Port, user string) Session {
+func New(config config.Config, conn *ssh.ServerConn, initialReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel, sessionRegistry registry.Registry, portRegistry portUtil.Port, user string) Session {
 	slugManager := slug.New()
-	forwarderManager := forwarder.New(slugManager, conn)
+	forwarderManager := forwarder.New(config, slugManager, conn)
 	lifecycleManager := lifecycle.New(conn, forwarderManager, slugManager, portRegistry, sessionRegistry, user)
-	interactionManager := interaction.New(slugManager, forwarderManager, sessionRegistry, user, lifecycleManager.Close)
+	interactionManager := interaction.New(config, slugManager, forwarderManager, sessionRegistry, user, lifecycleManager.Close)
 
 	return &session{
+		config:      config,
 		initialReq:  initialReq,
 		sshChan:     sshChan,
 		lifecycle:   lifecycleManager,
@@ -83,12 +85,12 @@ func (s *session) Slug() slug.Slug {
 
 func (s *session) Detail() *types.Detail {
 	tunnelTypeMap := map[types.TunnelType]string{
-		types.HTTP: "HTTP",
-		types.TCP:  "TCP",
+		types.TunnelTypeHTTP: "TunnelTypeHTTP",
+		types.TunnelTypeTCP:  "TunnelTypeTCP",
 	}
 	tunnelType, ok := tunnelTypeMap[s.forwarder.TunnelType()]
 	if !ok {
-		tunnelType = "UNKNOWN"
+		tunnelType = "TunnelTypeUNKNOWN"
 	}
 
 	return &types.Detail{
@@ -131,7 +133,7 @@ func (s *session) setupSessionMode() error {
 		}
 		return s.setupInteractiveMode(channel)
 	case <-time.After(500 * time.Millisecond):
-		s.interaction.SetMode(types.HEADLESS)
+		s.interaction.SetMode(types.InteractiveModeHEADLESS)
 		return nil
 	}
 }
@@ -152,13 +154,13 @@ func (s *session) setupInteractiveMode(channel ssh.NewChannel) error {
 
 	s.lifecycle.SetChannel(ch)
 	s.interaction.SetChannel(ch)
-	s.interaction.SetMode(types.INTERACTIVE)
+	s.interaction.SetMode(types.InteractiveModeINTERACTIVE)
 
 	return nil
 }
 
 func (s *session) handleMissingForwardRequest() error {
-	err := s.interaction.Send(fmt.Sprintf("PortRegistry forwarding request not received. Ensure you ran the correct command with -R flag. Example: ssh %s -p %s -R 80:localhost:3000", config.Getenv("DOMAIN", "localhost"), config.Getenv("PORT", "2200")))
+	err := s.interaction.Send(fmt.Sprintf("PortRegistry forwarding request not received. Ensure you ran the correct command with -R flag. Example: ssh %s -p %s -R 80:localhost:3000", s.config.Domain(), s.config.SSHPort()))
 	if err != nil {
 		return err
 	}
@@ -169,8 +171,8 @@ func (s *session) handleMissingForwardRequest() error {
 }
 
 func (s *session) shouldRejectUnauthorized() bool {
-	return s.interaction.Mode() == types.HEADLESS &&
-		config.Getenv("MODE", "standalone") == "standalone" &&
+	return s.interaction.Mode() == types.InteractiveModeHEADLESS &&
+		s.config.Mode() == types.ServerModeSTANDALONE &&
 		s.lifecycle.User() == "UNAUTHORIZED"
 }
 
@@ -318,7 +320,7 @@ func (s *session) finalizeForwarding(req *ssh.Request, portToBind uint16, listen
 	s.forwarder.SetType(tunnelType)
 	s.forwarder.SetForwardedPort(portToBind)
 	s.slug.Set(slug)
-	s.lifecycle.SetStatus(types.RUNNING)
+	s.lifecycle.SetStatus(types.SessionStatusRUNNING)
 
 	if listener != nil {
 		s.forwarder.SetListener(listener)
@@ -348,12 +350,12 @@ func (s *session) HandleHTTPForward(req *ssh.Request, portToBind uint16) error {
 	if err != nil {
 		return s.denyForwardingRequest(req, nil, nil, fmt.Sprintf("Failed to create slug: %s", err))
 	}
-	key := types.SessionKey{Id: randomString, Type: types.HTTP}
+	key := types.SessionKey{Id: randomString, Type: types.TunnelTypeHTTP}
 	if !s.registry.Register(key, s) {
 		return s.denyForwardingRequest(req, nil, nil, fmt.Sprintf("Failed to register client with slug: %s", randomString))
 	}
 
-	err = s.finalizeForwarding(req, portToBind, nil, types.HTTP, key.Id)
+	err = s.finalizeForwarding(req, portToBind, nil, types.TunnelTypeHTTP, key.Id)
 	if err != nil {
 		return s.denyForwardingRequest(req, &key, nil, fmt.Sprintf("Failed to finalize forwarding: %s", err))
 	}
@@ -371,12 +373,12 @@ func (s *session) HandleTCPForward(req *ssh.Request, addr string, portToBind uin
 		return s.denyForwardingRequest(req, nil, listener, fmt.Sprintf("PortRegistry %d is already in use or restricted", portToBind))
 	}
 
-	key := types.SessionKey{Id: fmt.Sprintf("%d", portToBind), Type: types.TCP}
+	key := types.SessionKey{Id: fmt.Sprintf("%d", portToBind), Type: types.TunnelTypeTCP}
 	if !s.registry.Register(key, s) {
-		return s.denyForwardingRequest(req, nil, listener, fmt.Sprintf("Failed to register TCP client with id: %s", key.Id))
+		return s.denyForwardingRequest(req, nil, listener, fmt.Sprintf("Failed to register TunnelTypeTCP client with id: %s", key.Id))
 	}
 
-	err = s.finalizeForwarding(req, portToBind, listener, types.TCP, key.Id)
+	err = s.finalizeForwarding(req, portToBind, listener, types.TunnelTypeTCP, key.Id)
 	if err != nil {
 		return s.denyForwardingRequest(req, &key, listener, fmt.Sprintf("Failed to finalize forwarding: %s", err))
 	}

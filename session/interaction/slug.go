@@ -15,7 +15,7 @@ import (
 func (m *model) slugUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
-	if m.tunnelType != types.HTTP {
+	if m.tunnelType != types.TunnelTypeHTTP {
 		m.editingSlug = false
 		m.slugError = ""
 		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
@@ -30,10 +30,10 @@ func (m *model) slugUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		inputValue := m.slugInput.Value()
 		if err := m.interaction.sessionRegistry.Update(m.interaction.user, types.SessionKey{
 			Id:   m.interaction.slug.String(),
-			Type: types.HTTP,
+			Type: types.TunnelTypeHTTP,
 		}, types.SessionKey{
 			Id:   inputValue,
-			Type: types.HTTP,
+			Type: types.TunnelTypeHTTP,
 		}); err != nil {
 			m.slugError = err.Error()
 			return m, nil
@@ -130,7 +130,7 @@ func (m *model) slugView() string {
 	b.WriteString(titleStyle.Render(title))
 	b.WriteString("\n\n")
 
-	if m.tunnelType != types.HTTP {
+	if m.tunnelType != types.TunnelTypeHTTP {
 		warningBoxWidth := getResponsiveWidth(m.width, 10, 30, 60)
 		warningBoxStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFA500")).
