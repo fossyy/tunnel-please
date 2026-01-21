@@ -1,11 +1,11 @@
-package httpheader
+package header
 
 import (
 	"bytes"
 	"fmt"
 )
 
-func NewResponseHeader(headerData []byte) (ResponseHeader, error) {
+func NewResponse(headerData []byte) (ResponseHeader, error) {
 	header := &responseHeader{
 		startLine: nil,
 		headers:   make(map[string]string, 16),

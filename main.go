@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -16,9 +17,10 @@ import (
 	"tunnel_pls/internal/grpc/client"
 	"tunnel_pls/internal/key"
 	"tunnel_pls/internal/port"
+	"tunnel_pls/internal/registry"
+	"tunnel_pls/internal/transport"
+	"tunnel_pls/internal/version"
 	"tunnel_pls/server"
-	"tunnel_pls/session"
-	"tunnel_pls/version"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -76,7 +78,7 @@ func main() {
 	}
 
 	sshConfig.AddHostKey(private)
-	sessionRegistry := session.NewRegistry()
+	sessionRegistry := registry.NewRegistry()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -131,7 +133,7 @@ func main() {
 				log.Fatalf("Failed to parse end port: %s", err)
 			}
 
-			if err = portManager.AddPortRange(uint16(start), uint16(end)); err != nil {
+			if err = portManager.AddRange(uint16(start), uint16(end)); err != nil {
 				log.Fatalf("Failed to add port range: %s", err)
 			}
 			log.Printf("PortRegistry range configured: %d-%d", start, end)
@@ -139,9 +141,51 @@ func main() {
 			log.Printf("Invalid ALLOWED_PORTS format, expected 'start-end', got: %s", rawRange)
 		}
 	}
+
+	tlsEnabled := config.Getenv("TLS_ENABLED", "false") == "true"
+	redirectTLS := config.Getenv("TLS_ENABLED", "false") == "true" && config.Getenv("TLS_REDIRECT", "false") == "true"
+
+	go func() {
+		httpPort := config.Getenv("HTTP_PORT", "8080")
+
+		var httpListener net.Listener
+		httpserver := transport.NewHTTPServer(httpPort, sessionRegistry, redirectTLS)
+		httpListener, err = httpserver.Listen()
+		if err != nil {
+			errChan <- fmt.Errorf("failed to start http server: %w", err)
+			return
+		}
+		err = httpserver.Serve(httpListener)
+		if err != nil {
+			errChan <- fmt.Errorf("error when serving http server: %w", err)
+			return
+		}
+	}()
+
+	if tlsEnabled {
+		go func() {
+			httpsPort := config.Getenv("HTTPS_PORT", "8443")
+			domain := config.Getenv("DOMAIN", "localhost")
+
+			var httpListener net.Listener
+			httpserver := transport.NewHTTPSServer(domain, httpsPort, sessionRegistry, redirectTLS)
+			httpListener, err = httpserver.Listen()
+			if err != nil {
+				errChan <- fmt.Errorf("failed to start http server: %w", err)
+				return
+			}
+			err = httpserver.Serve(httpListener)
+			if err != nil {
+				errChan <- fmt.Errorf("error when serving http server: %w", err)
+				return
+			}
+		}()
+	}
+
 	var app server.Server
 	go func() {
-		app, err = server.New(sshConfig, sessionRegistry, grpcClient, portManager)
+		sshPort := config.Getenv("PORT", "2200")
+		app, err = server.New(sshConfig, sessionRegistry, grpcClient, portManager, sshPort)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to start server: %s", err)
 			return

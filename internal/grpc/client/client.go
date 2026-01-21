@@ -8,9 +8,8 @@ import (
 	"log"
 	"time"
 	"tunnel_pls/internal/config"
+	"tunnel_pls/internal/registry"
 	"tunnel_pls/types"
-
-	"tunnel_pls/session"
 
 	proto "git.fossy.my.id/bagas/tunnel-please-grpc/gen"
 	"google.golang.org/grpc"
@@ -32,13 +31,13 @@ type Client interface {
 type client struct {
 	conn                       *grpc.ClientConn
 	address                    string
-	sessionRegistry            session.Registry
+	sessionRegistry            registry.Registry
 	eventService               proto.EventServiceClient
 	authorizeConnectionService proto.UserServiceClient
 	closing                    bool
 }
 
-func New(address string, sessionRegistry session.Registry) (Client, error) {
+func New(address string, sessionRegistry registry.Registry) (Client, error) {
 	var opts []grpc.DialOption
 
 	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))

@@ -12,6 +12,8 @@ import (
 	"tunnel_pls/internal/config"
 	portUtil "tunnel_pls/internal/port"
 	"tunnel_pls/internal/random"
+	"tunnel_pls/internal/registry"
+	"tunnel_pls/internal/transport"
 	"tunnel_pls/session/forwarder"
 	"tunnel_pls/session/interaction"
 	"tunnel_pls/session/lifecycle"
@@ -20,14 +22,6 @@ import (
 
 	"golang.org/x/crypto/ssh"
 )
-
-type Detail struct {
-	ForwardingType string    `json:"forwarding_type,omitempty"`
-	Slug           string    `json:"slug,omitempty"`
-	UserID         string    `json:"user_id,omitempty"`
-	Active         bool      `json:"active,omitempty"`
-	StartedAt      time.Time `json:"started_at,omitempty"`
-}
 
 type Session interface {
 	HandleGlobalRequest(ch <-chan *ssh.Request) error
@@ -38,7 +32,7 @@ type Session interface {
 	Interaction() interaction.Interaction
 	Forwarder() forwarder.Forwarder
 	Slug() slug.Slug
-	Detail() *Detail
+	Detail() *types.Detail
 	Start() error
 }
 
@@ -49,12 +43,12 @@ type session struct {
 	interaction interaction.Interaction
 	forwarder   forwarder.Forwarder
 	slug        slug.Slug
-	registry    Registry
+	registry    registry.Registry
 }
 
 var blockedReservedPorts = []uint16{1080, 1433, 1521, 1900, 2049, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 9000, 9200, 27017}
 
-func New(conn *ssh.ServerConn, initialReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel, sessionRegistry Registry, portRegistry portUtil.Registry, user string) Session {
+func New(conn *ssh.ServerConn, initialReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel, sessionRegistry registry.Registry, portRegistry portUtil.Port, user string) Session {
 	slugManager := slug.New()
 	forwarderManager := forwarder.New(slugManager, conn)
 	lifecycleManager := lifecycle.New(conn, forwarderManager, slugManager, portRegistry, sessionRegistry, user)
@@ -87,7 +81,7 @@ func (s *session) Slug() slug.Slug {
 	return s.slug
 }
 
-func (s *session) Detail() *Detail {
+func (s *session) Detail() *types.Detail {
 	tunnelTypeMap := map[types.TunnelType]string{
 		types.HTTP: "HTTP",
 		types.TCP:  "TCP",
@@ -97,7 +91,7 @@ func (s *session) Detail() *Detail {
 		tunnelType = "UNKNOWN"
 	}
 
-	return &Detail{
+	return &types.Detail{
 		ForwardingType: tunnelType,
 		Slug:           s.slug.String(),
 		UserID:         s.lifecycle.User(),
@@ -271,7 +265,7 @@ func (s *session) parseForwardPayload(payloadReader io.Reader) (address string, 
 	}
 
 	if port == 0 {
-		unassigned, ok := s.lifecycle.PortRegistry().GetUnassignedPort()
+		unassigned, ok := s.lifecycle.PortRegistry().Unassigned()
 		if !ok {
 			return "", 0, fmt.Errorf("no available port")
 		}
@@ -328,7 +322,6 @@ func (s *session) finalizeForwarding(req *ssh.Request, portToBind uint16, listen
 
 	if listener != nil {
 		s.forwarder.SetListener(listener)
-		go s.forwarder.AcceptTCPConnections()
 	}
 
 	return nil
@@ -346,7 +339,6 @@ func (s *session) HandleTCPIPForward(req *ssh.Request) error {
 	case 80, 443:
 		return s.HandleHTTPForward(req, port)
 	default:
-
 		return s.HandleTCPForward(req, address, port)
 	}
 }
@@ -369,11 +361,12 @@ func (s *session) HandleHTTPForward(req *ssh.Request, portToBind uint16) error {
 }
 
 func (s *session) HandleTCPForward(req *ssh.Request, addr string, portToBind uint16) error {
-	if claimed := s.lifecycle.PortRegistry().ClaimPort(portToBind); !claimed {
+	if claimed := s.lifecycle.PortRegistry().Claim(portToBind); !claimed {
 		return s.denyForwardingRequest(req, nil, nil, fmt.Sprintf("PortRegistry %d is already in use or restricted", portToBind))
 	}
 
-	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", portToBind))
+	tcpServer := transport.NewTCPServer(portToBind, s.forwarder)
+	listener, err := tcpServer.Listen()
 	if err != nil {
 		return s.denyForwardingRequest(req, nil, listener, fmt.Sprintf("PortRegistry %d is already in use or restricted", portToBind))
 	}
@@ -387,6 +380,14 @@ func (s *session) HandleTCPForward(req *ssh.Request, addr string, portToBind uin
 	if err != nil {
 		return s.denyForwardingRequest(req, &key, listener, fmt.Sprintf("Failed to finalize forwarding: %s", err))
 	}
+
+	go func() {
+		err = tcpServer.Serve(listener)
+		if err != nil {
+			log.Printf("Failed serving tcp server: %s\n", err)
+		}
+	}()
+
 	return nil
 }
 

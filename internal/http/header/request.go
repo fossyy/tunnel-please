@@ -1,11 +1,11 @@
-package httpheader
+package header
 
 import (
 	"bufio"
 	"fmt"
 )
 
-func NewRequestHeader(r interface{}) (RequestHeader, error) {
+func NewRequest(r interface{}) (RequestHeader, error) {
 	switch v := r.(type) {
 	case []byte:
 		return parseHeadersFromBytes(v)

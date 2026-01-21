@@ -56,14 +56,14 @@ type Forwarder interface {
 	Listener() net.Listener
 	TunnelType() types.TunnelType
 	ForwardedPort() uint16
-	HandleConnection(dst io.ReadWriter, src ssh.Channel, remoteAddr net.Addr)
+	HandleConnection(dst io.ReadWriter, src ssh.Channel)
 	CreateForwardedTCPIPPayload(origin net.Addr) []byte
+	OpenForwardedChannel(payload []byte) (ssh.Channel, <-chan *ssh.Request, error)
 	WriteBadGatewayResponse(dst io.Writer)
-	AcceptTCPConnections()
 	Close() error
 }
 
-func (f *forwarder) openForwardedChannel(payload []byte) (ssh.Channel, <-chan *ssh.Request, error) {
+func (f *forwarder) OpenForwardedChannel(payload []byte) (ssh.Channel, <-chan *ssh.Request, error) {
 	type channelResult struct {
 		channel ssh.Channel
 		reqs    <-chan *ssh.Request
@@ -95,38 +95,6 @@ func (f *forwarder) openForwardedChannel(payload []byte) (ssh.Channel, <-chan *s
 	}
 }
 
-func (f *forwarder) handleIncomingConnection(conn net.Conn) {
-	payload := f.CreateForwardedTCPIPPayload(conn.RemoteAddr())
-
-	channel, reqs, err := f.openForwardedChannel(payload)
-	if err != nil {
-		log.Printf("Failed to open forwarded-tcpip channel: %v", err)
-		err = conn.Close()
-		if err != nil {
-			log.Printf("Failed to close connection: %v", err)
-		}
-		return
-	}
-
-	go ssh.DiscardRequests(reqs)
-	go f.HandleConnection(conn, channel, conn.RemoteAddr())
-}
-
-func (f *forwarder) AcceptTCPConnections() {
-	for {
-		conn, err := f.Listener().Accept()
-		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				return
-			}
-			log.Printf("Error accepting connection: %v", err)
-			continue
-		}
-
-		go f.handleIncomingConnection(conn)
-	}
-}
-
 func closeWriter(w io.Writer) error {
 	if cw, ok := w.(interface{ CloseWrite() error }); ok {
 		return cw.CloseWrite()
@@ -145,20 +113,18 @@ func (f *forwarder) copyAndClose(dst io.Writer, src io.Reader, direction string)
 	}
 
 	if err = closeWriter(dst); err != nil && !errors.Is(err, io.EOF) {
-		errs = append(errs, fmt.Errorf("close writer error (%s): %w", direction, err))
+		errs = append(errs, fmt.Errorf("close stream error (%s): %w", direction, err))
 	}
 	return errors.Join(errs...)
 }
 
-func (f *forwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel, remoteAddr net.Addr) {
+func (f *forwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel) {
 	defer func() {
 		_, err := io.Copy(io.Discard, src)
 		if err != nil {
 			log.Printf("Failed to discard connection: %v", err)
 		}
 	}()
-
-	log.Printf("Handling new forwarded connection from %s", remoteAddr)
 
 	var wg sync.WaitGroup
 	wg.Add(2)

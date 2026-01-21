@@ -1,4 +1,4 @@
-package httpheader
+package header
 
 type ResponseHeader interface {
 	Value(key string) string

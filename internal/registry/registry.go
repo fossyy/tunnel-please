@@ -1,12 +1,24 @@
-package session
+package registry
 
 import (
 	"fmt"
 	"sync"
+	"tunnel_pls/session/forwarder"
+	"tunnel_pls/session/interaction"
+	"tunnel_pls/session/lifecycle"
+	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
 )
 
 type Key = types.SessionKey
+
+type Session interface {
+	Lifecycle() lifecycle.Lifecycle
+	Interaction() interaction.Interaction
+	Forwarder() forwarder.Forwarder
+	Slug() slug.Slug
+	Detail() *types.Detail
+}
 
 type Registry interface {
 	Get(key Key) (session Session, err error)
@@ -35,12 +47,12 @@ func (r *registry) Get(key Key) (session Session, err error) {
 
 	userID, ok := r.slugIndex[key]
 	if !ok {
-		return nil, fmt.Errorf("session not found")
+		return nil, fmt.Errorf("Session not found")
 	}
 
 	client, ok := r.byUser[userID][key]
 	if !ok {
-		return nil, fmt.Errorf("session not found")
+		return nil, fmt.Errorf("Session not found")
 	}
 	return client, nil
 }
@@ -51,7 +63,7 @@ func (r *registry) GetWithUser(user string, key Key) (session Session, err error
 
 	client, ok := r.byUser[user][key]
 	if !ok {
-		return nil, fmt.Errorf("session not found")
+		return nil, fmt.Errorf("Session not found")
 	}
 	return client, nil
 }
@@ -81,7 +93,7 @@ func (r *registry) Update(user string, oldKey, newKey Key) error {
 	}
 	client, ok := r.byUser[user][oldKey]
 	if !ok {
-		return fmt.Errorf("session not found")
+		return fmt.Errorf("Session not found")
 	}
 
 	delete(r.byUser[user], oldKey)
@@ -97,7 +109,7 @@ func (r *registry) Update(user string, oldKey, newKey Key) error {
 	return nil
 }
 
-func (r *registry) Register(key Key, session Session) (success bool) {
+func (r *registry) Register(key Key, userSession Session) (success bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -105,12 +117,12 @@ func (r *registry) Register(key Key, session Session) (success bool) {
 		return false
 	}
 
-	userID := session.Lifecycle().User()
+	userID := userSession.Lifecycle().User()
 	if r.byUser[userID] == nil {
 		r.byUser[userID] = make(map[Key]Session)
 	}
 
-	r.byUser[userID][key] = session
+	r.byUser[userID][key] = userSession
 	r.slugIndex[key] = userID
 	return true
 }

@@ -1,5 +1,7 @@
 package types
 
+import "time"
+
 type Status int
 
 const (
@@ -25,6 +27,14 @@ const (
 type SessionKey struct {
 	Id   string
 	Type TunnelType
+}
+
+type Detail struct {
+	ForwardingType string    `json:"forwarding_type,omitempty"`
+	Slug           string    `json:"slug,omitempty"`
+	UserID         string    `json:"user_id,omitempty"`
+	Active         bool      `json:"active,omitempty"`
+	StartedAt      time.Time `json:"started_at,omitempty"`
 }
 
 var BadGatewayResponse = []byte("HTTP/1.1 502 Bad Gateway\r\n" +

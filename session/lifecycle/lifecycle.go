@@ -31,11 +31,11 @@ type lifecycle struct {
 	slug            slug.Slug
 	startedAt       time.Time
 	sessionRegistry SessionRegistry
-	portRegistry    portUtil.Registry
+	portRegistry    portUtil.Port
 	user            string
 }
 
-func New(conn ssh.Conn, forwarder Forwarder, slugManager slug.Slug, port portUtil.Registry, sessionRegistry SessionRegistry, user string) Lifecycle {
+func New(conn ssh.Conn, forwarder Forwarder, slugManager slug.Slug, port portUtil.Port, sessionRegistry SessionRegistry, user string) Lifecycle {
 	return &lifecycle{
 		status:          types.INITIALIZING,
 		conn:            conn,
@@ -51,7 +51,7 @@ func New(conn ssh.Conn, forwarder Forwarder, slugManager slug.Slug, port portUti
 
 type Lifecycle interface {
 	Connection() ssh.Conn
-	PortRegistry() portUtil.Registry
+	PortRegistry() portUtil.Port
 	User() string
 	SetChannel(channel ssh.Channel)
 	SetStatus(status types.Status)
@@ -60,7 +60,7 @@ type Lifecycle interface {
 	Close() error
 }
 
-func (l *lifecycle) PortRegistry() portUtil.Registry {
+func (l *lifecycle) PortRegistry() portUtil.Port {
 	return l.portRegistry
 }
 
@@ -113,7 +113,7 @@ func (l *lifecycle) Close() error {
 	l.sessionRegistry.Remove(key)
 
 	if tunnelType == types.TCP {
-		if err := l.PortRegistry().SetPortStatus(l.forwarder.ForwardedPort(), false); err != nil && firstErr == nil {
+		if err := l.PortRegistry().SetStatus(l.forwarder.ForwardedPort(), false); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
