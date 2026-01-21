@@ -2,8 +2,6 @@ package lifecycle
 
 import (
 	"errors"
-	"io"
-	"net"
 	"time"
 
 	portUtil "tunnel_pls/internal/port"
@@ -81,28 +79,23 @@ func (l *lifecycle) SetStatus(status types.SessionStatus) {
 	}
 }
 
+func closeIfNotNil(c interface{ Close() error }) error {
+	if c != nil {
+		return c.Close()
+	}
+	return nil
+}
+
 func (l *lifecycle) Close() error {
-	var firstErr error
+	var errs []error
 	tunnelType := l.forwarder.TunnelType()
 
-	if err := l.forwarder.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-		firstErr = err
+	if err := closeIfNotNil(l.channel); err != nil {
+		errs = append(errs, err)
 	}
 
-	if l.channel != nil {
-		if err := l.channel.Close(); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
-			if firstErr == nil {
-				firstErr = err
-			}
-		}
-	}
-
-	if l.conn != nil {
-		if err := l.conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			if firstErr == nil {
-				firstErr = err
-			}
-		}
+	if err := closeIfNotNil(l.conn); err != nil {
+		errs = append(errs, err)
 	}
 
 	clientSlug := l.slug.String()
@@ -113,12 +106,15 @@ func (l *lifecycle) Close() error {
 	l.sessionRegistry.Remove(key)
 
 	if tunnelType == types.TunnelTypeTCP {
-		if err := l.PortRegistry().SetStatus(l.forwarder.ForwardedPort(), false); err != nil && firstErr == nil {
-			firstErr = err
+		if err := l.PortRegistry().SetStatus(l.forwarder.ForwardedPort(), false); err != nil {
+			errs = append(errs, err)
+		}
+		if err := l.forwarder.Close(); err != nil {
+			errs = append(errs, err)
 		}
 	}
 
-	return firstErr
+	return errors.Join(errs...)
 }
 
 func (l *lifecycle) IsActive() bool {
