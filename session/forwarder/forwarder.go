@@ -18,37 +18,6 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-var bufferPool = sync.Pool{
-	New: func() interface{} {
-		bufSize := config.GetBufferSize()
-		return make([]byte, bufSize)
-	},
-}
-
-func copyWithBuffer(dst io.Writer, src io.Reader) (written int64, err error) {
-	buf := bufferPool.Get().([]byte)
-	defer bufferPool.Put(buf)
-	return io.CopyBuffer(dst, src, buf)
-}
-
-type forwarder struct {
-	listener      net.Listener
-	tunnelType    types.TunnelType
-	forwardedPort uint16
-	slug          slug.Slug
-	conn          ssh.Conn
-}
-
-func New(slug slug.Slug, conn ssh.Conn) Forwarder {
-	return &forwarder{
-		listener:      nil,
-		tunnelType:    types.UNKNOWN,
-		forwardedPort: 0,
-		slug:          slug,
-		conn:          conn,
-	}
-}
-
 type Forwarder interface {
 	SetType(tunnelType types.TunnelType)
 	SetForwardedPort(port uint16)
@@ -61,6 +30,36 @@ type Forwarder interface {
 	OpenForwardedChannel(payload []byte) (ssh.Channel, <-chan *ssh.Request, error)
 	WriteBadGatewayResponse(dst io.Writer)
 	Close() error
+}
+type forwarder struct {
+	listener      net.Listener
+	tunnelType    types.TunnelType
+	forwardedPort uint16
+	slug          slug.Slug
+	conn          ssh.Conn
+	bufferPool    sync.Pool
+}
+
+func New(config config.Config, slug slug.Slug, conn ssh.Conn) Forwarder {
+	return &forwarder{
+		listener:      nil,
+		tunnelType:    types.TunnelTypeUNKNOWN,
+		forwardedPort: 0,
+		slug:          slug,
+		conn:          conn,
+		bufferPool: sync.Pool{
+			New: func() interface{} {
+				bufSize := config.BufferSize()
+				return make([]byte, bufSize)
+			},
+		},
+	}
+}
+
+func (f *forwarder) copyWithBuffer(dst io.Writer, src io.Reader) (written int64, err error) {
+	buf := f.bufferPool.Get().([]byte)
+	defer f.bufferPool.Put(buf)
+	return io.CopyBuffer(dst, src, buf)
 }
 
 func (f *forwarder) OpenForwardedChannel(payload []byte) (ssh.Channel, <-chan *ssh.Request, error) {
@@ -107,7 +106,7 @@ func closeWriter(w io.Writer) error {
 
 func (f *forwarder) copyAndClose(dst io.Writer, src io.Reader, direction string) error {
 	var errs []error
-	_, err := copyWithBuffer(dst, src)
+	_, err := f.copyWithBuffer(dst, src)
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
 		errs = append(errs, fmt.Errorf("copy error (%s): %w", direction, err))
 	}

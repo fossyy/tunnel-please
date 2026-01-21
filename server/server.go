@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"time"
+	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/grpc/client"
 	"tunnel_pls/internal/port"
 	"tunnel_pls/internal/registry"
@@ -20,24 +21,26 @@ type Server interface {
 	Close() error
 }
 type server struct {
+	config          config.Config
 	sshPort         string
 	sshListener     net.Listener
-	config          *ssh.ServerConfig
+	sshConfig       *ssh.ServerConfig
 	grpcClient      client.Client
 	sessionRegistry registry.Registry
 	portRegistry    port.Port
 }
 
-func New(sshConfig *ssh.ServerConfig, sessionRegistry registry.Registry, grpcClient client.Client, portRegistry port.Port, sshPort string) (Server, error) {
+func New(config config.Config, sshConfig *ssh.ServerConfig, sessionRegistry registry.Registry, grpcClient client.Client, portRegistry port.Port, sshPort string) (Server, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", sshPort))
 	if err != nil {
 		return nil, err
 	}
 
 	return &server{
+		config:          config,
 		sshPort:         sshPort,
 		sshListener:     listener,
-		config:          sshConfig,
+		sshConfig:       sshConfig,
 		grpcClient:      grpcClient,
 		sessionRegistry: sessionRegistry,
 		portRegistry:    portRegistry,
@@ -66,7 +69,7 @@ func (s *server) Close() error {
 }
 
 func (s *server) handleConnection(conn net.Conn) {
-	sshConn, chans, forwardingReqs, err := ssh.NewServerConn(conn, s.config)
+	sshConn, chans, forwardingReqs, err := ssh.NewServerConn(conn, s.sshConfig)
 	if err != nil {
 		log.Printf("failed to establish SSH connection: %v", err)
 		err = conn.Close()
@@ -92,7 +95,7 @@ func (s *server) handleConnection(conn net.Conn) {
 		cancel()
 	}
 	log.Println("SSH connection established:", sshConn.User())
-	sshSession := session.New(sshConn, forwardingReqs, chans, s.sessionRegistry, s.portRegistry, user)
+	sshSession := session.New(s.config, sshConn, forwardingReqs, chans, s.sessionRegistry, s.portRegistry, user)
 	err = sshSession.Start()
 	if err != nil {
 		log.Printf("SSH session ended with error: %v", err)

@@ -12,9 +12,9 @@ type httpServer struct {
 	port    string
 }
 
-func NewHTTPServer(port string, sessionRegistry registry.Registry, redirectTLS bool) Transport {
+func NewHTTPServer(domain, port string, sessionRegistry registry.Registry, redirectTLS bool) Transport {
 	return &httpServer{
-		handler: newHTTPHandler(sessionRegistry, redirectTLS),
+		handler: newHTTPHandler(domain, sessionRegistry, redirectTLS),
 		port:    port,
 	}
 }

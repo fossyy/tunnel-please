@@ -47,12 +47,12 @@ func (r *registry) Get(key Key) (session Session, err error) {
 
 	userID, ok := r.slugIndex[key]
 	if !ok {
-		return nil, fmt.Errorf("Session not found")
+		return nil, fmt.Errorf("session not found")
 	}
 
 	client, ok := r.byUser[userID][key]
 	if !ok {
-		return nil, fmt.Errorf("Session not found")
+		return nil, fmt.Errorf("session not found")
 	}
 	return client, nil
 }
@@ -63,7 +63,7 @@ func (r *registry) GetWithUser(user string, key Key) (session Session, err error
 
 	client, ok := r.byUser[user][key]
 	if !ok {
-		return nil, fmt.Errorf("Session not found")
+		return nil, fmt.Errorf("session not found")
 	}
 	return client, nil
 }
@@ -73,7 +73,7 @@ func (r *registry) Update(user string, oldKey, newKey Key) error {
 		return fmt.Errorf("tunnel type cannot change")
 	}
 
-	if newKey.Type != types.HTTP {
+	if newKey.Type != types.TunnelTypeHTTP {
 		return fmt.Errorf("non http tunnel cannot change slug")
 	}
 
@@ -93,7 +93,7 @@ func (r *registry) Update(user string, oldKey, newKey Key) error {
 	}
 	client, ok := r.byUser[user][oldKey]
 	if !ok {
-		return fmt.Errorf("Session not found")
+		return fmt.Errorf("session not found")
 	}
 
 	delete(r.byUser[user], oldKey)

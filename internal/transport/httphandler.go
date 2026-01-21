@@ -4,12 +4,12 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"strings"
 	"time"
-	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/http/header"
 	"tunnel_pls/internal/http/stream"
 	"tunnel_pls/internal/middleware"
@@ -20,19 +20,21 @@ import (
 )
 
 type httpHandler struct {
+	domain          string
 	sessionRegistry registry.Registry
 	redirectTLS     bool
 }
 
-func newHTTPHandler(sessionRegistry registry.Registry, redirectTLS bool) *httpHandler {
+func newHTTPHandler(domain string, sessionRegistry registry.Registry, redirectTLS bool) *httpHandler {
 	return &httpHandler{
+		domain:          domain,
 		sessionRegistry: sessionRegistry,
 		redirectTLS:     redirectTLS,
 	}
 }
 
 func (hh *httpHandler) redirect(conn net.Conn, status int, location string) error {
-	_, err := conn.Write([]byte(fmt.Sprintf("HTTP/1.1 %d Moved Permanently\r\n", status) +
+	_, err := conn.Write([]byte(fmt.Sprintf("TunnelTypeHTTP/1.1 %d Moved Permanently\r\n", status) +
 		fmt.Sprintf("Location: %s", location) +
 		"Content-Length: 0\r\n" +
 		"Connection: close\r\n" +
@@ -44,7 +46,7 @@ func (hh *httpHandler) redirect(conn net.Conn, status int, location string) erro
 }
 
 func (hh *httpHandler) badRequest(conn net.Conn) error {
-	if _, err := conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n")); err != nil {
+	if _, err := conn.Write([]byte("TunnelTypeHTTP/1.1 400 Bad Request\r\n\r\n")); err != nil {
 		return err
 	}
 	return nil
@@ -67,7 +69,7 @@ func (hh *httpHandler) handler(conn net.Conn, isTLS bool) {
 	}
 
 	if hh.shouldRedirectToTLS(isTLS) {
-		_ = hh.redirect(conn, http.StatusMovedPermanently, fmt.Sprintf("Location: https://%s.%s/\r\n", slug, config.Getenv("DOMAIN", "localhost")))
+		_ = hh.redirect(conn, http.StatusMovedPermanently, fmt.Sprintf("Location: https://%s.%s/\r\n", slug, hh.domain))
 		return
 	}
 
@@ -85,7 +87,7 @@ func (hh *httpHandler) handler(conn net.Conn, isTLS bool) {
 	defer func(hw stream.HTTP) {
 		err = hw.Close()
 		if err != nil {
-			log.Printf("Error closing HTTP stream: %v", err)
+			log.Printf("Error closing TunnelTypeHTTP stream: %v", err)
 		}
 	}(hw)
 	hh.forwardRequest(hw, reqhf, sshSession)
@@ -116,7 +118,7 @@ func (hh *httpHandler) handlePingRequest(slug string, conn net.Conn) bool {
 	}
 
 	_, err := conn.Write([]byte(
-		"HTTP/1.1 200 OK\r\n" +
+		"TunnelTypeHTTP/1.1 200 OK\r\n" +
 			"Content-Length: 0\r\n" +
 			"Connection: close\r\n" +
 			"Access-Control-Allow-Origin: *\r\n" +
@@ -133,7 +135,7 @@ func (hh *httpHandler) handlePingRequest(slug string, conn net.Conn) bool {
 func (hh *httpHandler) getSession(slug string) (registry.Session, error) {
 	sshSession, err := hh.sessionRegistry.Get(types.SessionKey{
 		Id:   slug,
-		Type: types.HTTP,
+		Type: types.TunnelTypeHTTP,
 	})
 	if err != nil {
 		return nil, err
@@ -143,17 +145,19 @@ func (hh *httpHandler) getSession(slug string) (registry.Session, error) {
 
 func (hh *httpHandler) forwardRequest(hw stream.HTTP, initialRequest header.RequestHeader, sshSession registry.Session) {
 	channel, err := hh.openForwardedChannel(hw, sshSession)
-	defer func() {
-		err = channel.Close()
-		if err != nil {
-			log.Printf("Error closing forwarded channel: %v", err)
-		}
-	}()
 	if err != nil {
 		log.Printf("Failed to establish channel: %v", err)
 		sshSession.Forwarder().WriteBadGatewayResponse(hw)
 		return
 	}
+
+	defer func() {
+		err = channel.Close()
+		if err != nil && !errors.Is(err, io.EOF) {
+			log.Printf("Error closing forwarded channel: %v", err)
+		}
+	}()
+
 	hh.setupMiddlewares(hw)
 
 	if err = hh.sendInitialRequest(hw, initialRequest, channel); err != nil {

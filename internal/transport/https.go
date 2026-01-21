@@ -9,28 +9,25 @@ import (
 )
 
 type https struct {
+	tlsConfig   *tls.Config
 	httpHandler *httpHandler
 	domain      string
 	port        string
 }
 
-func NewHTTPSServer(domain, port string, sessionRegistry registry.Registry, redirectTLS bool) Transport {
+func NewHTTPSServer(domain, port string, sessionRegistry registry.Registry, redirectTLS bool, tlsConfig *tls.Config) Transport {
 	return &https{
-		httpHandler: newHTTPHandler(sessionRegistry, redirectTLS),
+		tlsConfig:   tlsConfig,
+		httpHandler: newHTTPHandler(domain, sessionRegistry, redirectTLS),
 		domain:      domain,
 		port:        port,
 	}
 }
 
 func (ht *https) Listen() (net.Listener, error) {
-	tlsConfig, err := NewTLSConfig(ht.domain)
-	if err != nil {
-		return nil, err
-	}
-
-	return tls.Listen("tcp", ":"+ht.port, tlsConfig)
-
+	return tls.Listen("tcp", ":"+ht.port, ht.tlsConfig)
 }
+
 func (ht *https) Serve(listener net.Listener) error {
 	log.Printf("HTTPS server is starting on port %s", ht.port)
 	for {

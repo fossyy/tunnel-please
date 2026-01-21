@@ -41,7 +41,7 @@ type model struct {
 }
 
 func (m *model) getTunnelURL() string {
-	if m.tunnelType == types.HTTP {
+	if m.tunnelType == types.TunnelTypeHTTP {
 		return buildURL(m.protocol, m.interaction.slug.String(), m.domain)
 	}
 	return fmt.Sprintf("tcp://%s:%d", m.domain, m.port)

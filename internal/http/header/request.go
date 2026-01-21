@@ -32,15 +32,15 @@ func (req *requestHeader) Remove(key string) {
 	delete(req.headers, key)
 }
 
-func (req *requestHeader) GetMethod() string {
+func (req *requestHeader) Method() string {
 	return req.method
 }
 
-func (req *requestHeader) GetPath() string {
+func (req *requestHeader) Path() string {
 	return req.path
 }
 
-func (req *requestHeader) GetVersion() string {
+func (req *requestHeader) Version() string {
 	return req.version
 }
 

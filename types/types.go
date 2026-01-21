@@ -2,26 +2,33 @@ package types
 
 import "time"
 
-type Status int
+type SessionStatus int
 
 const (
-	INITIALIZING Status = iota
-	RUNNING
+	SessionStatusINITIALIZING SessionStatus = iota
+	SessionStatusRUNNING
 )
 
-type Mode int
+type InteractiveMode int
 
 const (
-	INTERACTIVE Mode = iota
-	HEADLESS
+	InteractiveModeINTERACTIVE InteractiveMode = iota + 1
+	InteractiveModeHEADLESS
 )
 
 type TunnelType int
 
 const (
-	UNKNOWN TunnelType = iota
-	HTTP
-	TCP
+	TunnelTypeUNKNOWN TunnelType = iota
+	TunnelTypeHTTP
+	TunnelTypeTCP
+)
+
+type ServerMode int
+
+const (
+	ServerModeSTANDALONE = iota + 1
+	ServerModeNODE
 )
 
 type SessionKey struct {
@@ -37,7 +44,7 @@ type Detail struct {
 	StartedAt      time.Time `json:"started_at,omitempty"`
 }
 
-var BadGatewayResponse = []byte("HTTP/1.1 502 Bad Gateway\r\n" +
+var BadGatewayResponse = []byte("TunnelTypeHTTP/1.1 502 Bad Gateway\r\n" +
 	"Content-Length: 11\r\n" +
 	"Content-Type: text/plain\r\n\r\n" +
 	"Bad Gateway")
