@@ -468,89 +468,108 @@ func TestRegistry_Register(t *testing.T) {
 }
 
 func TestRegistry_GetAllSessionFromUser(t *testing.T) {
-	t.Run("user has no sessions", func(t *testing.T) {
-		r := &registry{
-			byUser:    make(map[string]map[Key]Session),
-			slugIndex: make(map[Key]string),
-		}
-		sessions := r.GetAllSessionFromUser("user1")
-		if len(sessions) != 0 {
-			t.Errorf("expected 0 sessions, got %d", len(sessions))
-		}
-	})
+	tests := []struct {
+		name      string
+		setupFunc func(r *registry) string
+		expectN   int
+	}{
+		{
+			name: "user has no sessions",
+			setupFunc: func(r *registry) string {
+				return "user1"
+			},
+			expectN: 0,
+		},
+		{
+			name: "user has multiple sessions",
+			setupFunc: func(r *registry) string {
+				user := "user1"
+				key1 := types.SessionKey{Id: "a", Type: types.TunnelTypeHTTP}
+				key2 := types.SessionKey{Id: "b", Type: types.TunnelTypeTCP}
+				r.mu.Lock()
+				r.byUser[user] = map[Key]Session{
+					key1: &mockSession{user: user},
+					key2: &mockSession{user: user},
+				}
+				r.mu.Unlock()
+				return user
+			},
+			expectN: 2,
+		},
+	}
 
-	t.Run("user has multiple sessions", func(t *testing.T) {
-		r := &registry{
-			byUser:    make(map[string]map[Key]Session),
-			slugIndex: make(map[Key]string),
-			mu:        sync.RWMutex{},
-		}
-
-		user := "user1"
-		key1 := types.SessionKey{Id: "a", Type: types.TunnelTypeHTTP}
-		key2 := types.SessionKey{Id: "b", Type: types.TunnelTypeTCP}
-		session1 := &mockSession{user: user}
-		session2 := &mockSession{user: user}
-
-		r.mu.Lock()
-		r.byUser[user] = map[Key]Session{
-			key1: session1,
-			key2: session2,
-		}
-		r.mu.Unlock()
-
-		sessions := r.GetAllSessionFromUser(user)
-		if len(sessions) != 2 {
-			t.Errorf("expected 2 sessions, got %d", len(sessions))
-		}
-
-		found := map[Session]bool{}
-		for _, s := range sessions {
-			found[s] = true
-		}
-		if !found[session1] || !found[session2] {
-			t.Errorf("returned sessions do not match expected")
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &registry{
+				byUser:    make(map[string]map[Key]Session),
+				slugIndex: make(map[Key]string),
+				mu:        sync.RWMutex{},
+			}
+			user := tt.setupFunc(r)
+			sessions := r.GetAllSessionFromUser(user)
+			if len(sessions) != tt.expectN {
+				t.Errorf("expected %d sessions, got %d", tt.expectN, len(sessions))
+			}
+		})
+	}
 }
 
 func TestRegistry_Remove(t *testing.T) {
-	t.Run("remove existing key", func(t *testing.T) {
-		r := &registry{
-			byUser:    make(map[string]map[Key]Session),
-			slugIndex: make(map[Key]string),
-			mu:        sync.RWMutex{},
-		}
+	tests := []struct {
+		name      string
+		setupFunc func(r *registry) (string, types.SessionKey)
+		key       types.SessionKey
+		verify    func(*testing.T, *registry, string, types.SessionKey)
+	}{
+		{
+			name: "remove existing key",
+			setupFunc: func(r *registry) (string, types.SessionKey) {
+				user := "user1"
+				key := types.SessionKey{Id: "a", Type: types.TunnelTypeHTTP}
+				session := &mockSession{user: user}
+				r.mu.Lock()
+				r.byUser[user] = map[Key]Session{key: session}
+				r.slugIndex[key] = user
+				r.mu.Unlock()
+				return user, key
+			},
+			verify: func(t *testing.T, r *registry, user string, key types.SessionKey) {
+				if _, ok := r.byUser[user][key]; ok {
+					t.Errorf("expected key to be removed from byUser")
+				}
+				if _, ok := r.slugIndex[key]; ok {
+					t.Errorf("expected key to be removed from slugIndex")
+				}
+				if _, ok := r.byUser[user]; ok {
+					t.Errorf("expected user to be removed from byUser map")
+				}
+			},
+		},
+		{
+			name: "remove non-existing key",
+			setupFunc: func(r *registry) (string, types.SessionKey) {
+				return "", types.SessionKey{Id: "nonexist", Type: types.TunnelTypeHTTP}
+			},
+		},
+	}
 
-		user := "user1"
-		key := types.SessionKey{Id: "a", Type: types.TunnelTypeHTTP}
-		session := &mockSession{user: user}
-
-		r.mu.Lock()
-		r.byUser[user] = map[Key]Session{key: session}
-		r.slugIndex[key] = user
-		r.mu.Unlock()
-
-		r.Remove(key)
-
-		if _, ok := r.byUser[user][key]; ok {
-			t.Errorf("expected key to be removed from byUser")
-		}
-		if _, ok := r.slugIndex[key]; ok {
-			t.Errorf("expected key to be removed from slugIndex")
-		}
-		if _, ok := r.byUser[user]; ok {
-			t.Errorf("expected user to be removed from byUser map")
-		}
-	})
-
-	t.Run("remove non-existing key", func(t *testing.T) {
-		r := &registry{
-			byUser:    make(map[string]map[Key]Session),
-			slugIndex: make(map[Key]string),
-		}
-		r.Remove(types.SessionKey{Id: "nonexist", Type: types.TunnelTypeHTTP})
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &registry{
+				byUser:    make(map[string]map[Key]Session),
+				slugIndex: make(map[Key]string),
+				mu:        sync.RWMutex{},
+			}
+			user, key := tt.setupFunc(r)
+			if user == "" {
+				key = tt.key
+			}
+			r.Remove(key)
+			if tt.verify != nil {
+				tt.verify(t, r, user, key)
+			}
+		})
+	}
 }
 
 func TestIsValidSlug(t *testing.T) {

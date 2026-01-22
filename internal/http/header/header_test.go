@@ -317,11 +317,28 @@ func TestSetRemainingHeaders(t *testing.T) {
 }
 
 func TestParseHeadersFromReaderEdgeCases(t *testing.T) {
-	t.Run("malformed header line", func(t *testing.T) {
-		data := []byte("GET / HTTP/1.1\r\nMalformedLine\r\nK1: V1\r\n\r\n")
-		br := bufio.NewReader(bytes.NewReader(data))
-		req, err := parseHeadersFromReader(br)
-		assert.NoError(t, err)
-		assert.Equal(t, "V1", req.Value("K1"))
-	})
+	tests := []struct {
+		name          string
+		data          []byte
+		expectHeaders map[string]string
+	}{
+		{
+			name: "malformed header line",
+			data: []byte("GET / HTTP/1.1\r\nMalformedLine\r\nK1: V1\r\n\r\n"),
+			expectHeaders: map[string]string{
+				"K1": "V1",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			br := bufio.NewReader(bytes.NewReader(tt.data))
+			req, err := parseHeadersFromReader(br)
+			assert.NoError(t, err)
+			for k, v := range tt.expectHeaders {
+				assert.Equal(t, v, req.Value(k))
+			}
+		})
+	}
 }

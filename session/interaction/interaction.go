@@ -256,8 +256,6 @@ func (i *interaction) Start() {
 	i.program.Kill()
 	i.program = nil
 	if i.closeFunc != nil {
-		if err := i.closeFunc(); err != nil {
-			log.Printf("Cannot close session: %s \n", err)
-		}
+		_ = i.closeFunc()
 	}
 }

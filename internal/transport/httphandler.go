@@ -175,7 +175,11 @@ func (hh *httpHandler) openForwardedChannel(hw stream.HTTP, sshSession registry.
 
 	go func() {
 		channel, reqs, err := sshSession.Lifecycle().Connection().OpenChannel("forwarded-tcpip", payload)
-		resultChan <- channelResult{channel, reqs, err}
+		select {
+		case resultChan <- channelResult{channel, reqs, err}:
+		default:
+			hh.cleanupUnusedChannel(channel, reqs)
+		}
 	}()
 
 	select {

@@ -3,6 +3,7 @@ package random
 import (
 	"errors"
 	"fmt"
+	"io"
 	"testing"
 )
 
@@ -44,18 +45,32 @@ func TestRandom_String(t *testing.T) {
 }
 
 func TestRandomWithFailingReader_String(t *testing.T) {
-	var randomizer Random
-	var errBrainrot = fmt.Errorf("you are not sigma enough")
-	randomizer = &random{reader: &brainrotReader{err: errBrainrot}}
-	t.Run("test failing reader", func(t *testing.T) {
-		result, err := randomizer.String(20)
-		if !errors.Is(err, errBrainrot) {
-			t.Errorf("String() error = %v, wantErr %v", err, errBrainrot)
-			return
-		}
+	errBrainrot := fmt.Errorf("you are not sigma enough")
 
-		if result != "" {
-			t.Errorf("String() result = %v, want an empty string due to error", result)
-		}
-	})
+	tests := []struct {
+		name      string
+		reader    io.Reader
+		expectErr error
+	}{
+		{
+			name:      "failing reader",
+			reader:    &brainrotReader{err: errBrainrot},
+			expectErr: errBrainrot,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			randomizer := &random{reader: tt.reader}
+			result, err := randomizer.String(20)
+			if !errors.Is(err, tt.expectErr) {
+				t.Errorf("String() error = %v, wantErr %v", err, tt.expectErr)
+				return
+			}
+
+			if result != "" {
+				t.Errorf("String() result = %v, want an empty string due to error", result)
+			}
+		})
+	}
 }

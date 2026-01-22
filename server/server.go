@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"time"
@@ -85,7 +86,7 @@ func (s *server) handleConnection(conn net.Conn) {
 
 	defer func(sshConn *ssh.ServerConn) {
 		err = sshConn.Close()
-		if err != nil && !errors.Is(err, net.ErrClosed) {
+		if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
 			log.Printf("failed to close SSH server: %v", err)
 		}
 	}(sshConn)
@@ -101,7 +102,7 @@ func (s *server) handleConnection(conn net.Conn) {
 	sshSession := session.New(s.randomizer, s.config, sshConn, forwardingReqs, chans, s.sessionRegistry, s.portRegistry, user)
 	err = sshSession.Start()
 	if err != nil {
-		log.Printf("SSH session ended with error: %v", err)
+		log.Printf("SSH session ended with error: %s", err.Error())
 		return
 	}
 	return
