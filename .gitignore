@@ -6,3 +6,4 @@ tmp
 certs
 app
 coverage
+test-results.json
