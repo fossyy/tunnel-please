@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"tunnel_pls/internal/config"
+	"tunnel_pls/internal/random"
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
 
@@ -39,6 +40,7 @@ type Forwarder interface {
 
 type CloseFunc func() error
 type interaction struct {
+	randomizer      random.Random
 	config          config.Config
 	channel         ssh.Channel
 	slug            slug.Slug
@@ -76,9 +78,10 @@ func (i *interaction) SetWH(w, h int) {
 	}
 }
 
-func New(config config.Config, slug slug.Slug, forwarder Forwarder, sessionRegistry SessionRegistry, user string, closeFunc CloseFunc) Interaction {
+func New(randomizer random.Random, config config.Config, slug slug.Slug, forwarder Forwarder, sessionRegistry SessionRegistry, user string, closeFunc CloseFunc) Interaction {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &interaction{
+		randomizer:      randomizer,
 		config:          config,
 		channel:         nil,
 		slug:            slug,
@@ -210,6 +213,7 @@ func (i *interaction) Start() {
 	ti.Width = 50
 
 	m := &model{
+		randomizer:  i.randomizer,
 		domain:      i.config.Domain(),
 		protocol:    protocol,
 		tunnelType:  tunnelType,

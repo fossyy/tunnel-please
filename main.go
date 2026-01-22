@@ -15,6 +15,7 @@ import (
 	"tunnel_pls/internal/grpc/client"
 	"tunnel_pls/internal/key"
 	"tunnel_pls/internal/port"
+	"tunnel_pls/internal/random"
 	"tunnel_pls/internal/registry"
 	"tunnel_pls/internal/transport"
 	"tunnel_pls/internal/version"
@@ -127,17 +128,17 @@ func main() {
 			}
 		}()
 	}
-	
+
 	portManager := port.New()
 	err = portManager.AddRange(conf.AllowedPortsStart(), conf.AllowedPortsEnd())
 	if err != nil {
 		log.Fatalf("Failed to initialize port manager: %s", err)
 		return
 	}
-
+	randomizer := random.New()
 	var app server.Server
 	go func() {
-		app, err = server.New(conf, sshConfig, sessionRegistry, grpcClient, portManager, conf.SSHPort())
+		app, err = server.New(randomizer, conf, sshConfig, sessionRegistry, grpcClient, portManager, conf.SSHPort())
 		if err != nil {
 			errChan <- fmt.Errorf("failed to start server: %s", err)
 			return

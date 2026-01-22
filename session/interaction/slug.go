@@ -3,7 +3,6 @@ package interaction
 import (
 	"fmt"
 	"strings"
-	"tunnel_pls/internal/random"
 	"tunnel_pls/types"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -47,7 +46,7 @@ func (m *model) slugUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
 	default:
 		if key.Matches(msg, m.keymap.random) {
-			newSubdomain, err := random.GenerateRandomString(20)
+			newSubdomain, err := m.randomizer.String(20)
 			if err != nil {
 				return m, cmd
 			}

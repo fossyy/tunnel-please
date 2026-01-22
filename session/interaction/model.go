@@ -3,6 +3,7 @@ package interaction
 import (
 	"fmt"
 	"time"
+	"tunnel_pls/internal/random"
 	"tunnel_pls/types"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -22,6 +23,7 @@ func (i commandItem) Title() string       { return i.name }
 func (i commandItem) Description() string { return i.desc }
 
 type model struct {
+	randomizer        random.Random
 	domain            string
 	protocol          string
 	tunnelType        types.TunnelType

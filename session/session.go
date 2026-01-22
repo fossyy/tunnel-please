@@ -37,6 +37,7 @@ type Session interface {
 }
 
 type session struct {
+	randomizer  random.Random
 	config      config.Config
 	initialReq  <-chan *ssh.Request
 	sshChan     <-chan ssh.NewChannel
@@ -49,13 +50,14 @@ type session struct {
 
 var blockedReservedPorts = []uint16{1080, 1433, 1521, 1900, 2049, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 9000, 9200, 27017}
 
-func New(config config.Config, conn *ssh.ServerConn, initialReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel, sessionRegistry registry.Registry, portRegistry portUtil.Port, user string) Session {
+func New(randomizer random.Random, config config.Config, conn *ssh.ServerConn, initialReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel, sessionRegistry registry.Registry, portRegistry portUtil.Port, user string) Session {
 	slugManager := slug.New()
 	forwarderManager := forwarder.New(config, slugManager, conn)
 	lifecycleManager := lifecycle.New(conn, forwarderManager, slugManager, portRegistry, sessionRegistry, user)
-	interactionManager := interaction.New(config, slugManager, forwarderManager, sessionRegistry, user, lifecycleManager.Close)
+	interactionManager := interaction.New(randomizer, config, slugManager, forwarderManager, sessionRegistry, user, lifecycleManager.Close)
 
 	return &session{
+		randomizer:  randomizer,
 		config:      config,
 		initialReq:  initialReq,
 		sshChan:     sshChan,
@@ -346,7 +348,7 @@ func (s *session) HandleTCPIPForward(req *ssh.Request) error {
 }
 
 func (s *session) HandleHTTPForward(req *ssh.Request, portToBind uint16) error {
-	randomString, err := random.GenerateRandomString(20)
+	randomString, err := s.randomizer.String(20)
 	if err != nil {
 		return s.denyForwardingRequest(req, nil, nil, fmt.Sprintf("Failed to create slug: %s", err))
 	}
