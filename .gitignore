@@ -5,3 +5,4 @@ id_rsa*
 tmp
 certs
 app
+coverage
