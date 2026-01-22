@@ -40,6 +40,6 @@ func (ht *https) Serve(listener net.Listener) error {
 			continue
 		}
 
-		go ht.httpHandler.handler(conn, true)
+		go ht.httpHandler.Handler(conn, true)
 	}
 }

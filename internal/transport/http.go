@@ -35,6 +35,6 @@ func (ht *httpServer) Serve(listener net.Listener) error {
 			continue
 		}
 
-		go ht.handler.handler(conn, false)
+		go ht.handler.Handler(conn, false)
 	}
 }

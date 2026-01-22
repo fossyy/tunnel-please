@@ -12,16 +12,16 @@ import (
 
 type tcp struct {
 	port      uint16
-	forwarder forwarder
+	forwarder Forwarder
 }
 
-type forwarder interface {
+type Forwarder interface {
 	CreateForwardedTCPIPPayload(origin net.Addr) []byte
 	OpenForwardedChannel(payload []byte) (ssh.Channel, <-chan *ssh.Request, error)
 	HandleConnection(dst io.ReadWriter, src ssh.Channel)
 }
 
-func NewTCPServer(port uint16, forwarder forwarder) Transport {
+func NewTCPServer(port uint16, forwarder Forwarder) Transport {
 	return &tcp{
 		port:      port,
 		forwarder: forwarder,
