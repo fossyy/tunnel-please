@@ -8,9 +8,8 @@ import (
 	"log"
 	"time"
 	"tunnel_pls/internal/config"
+	"tunnel_pls/internal/registry"
 	"tunnel_pls/types"
-
-	"tunnel_pls/session"
 
 	proto "git.fossy.my.id/bagas/tunnel-please-grpc/gen"
 	"google.golang.org/grpc"
@@ -30,15 +29,16 @@ type Client interface {
 	CheckServerHealth(ctx context.Context) error
 }
 type client struct {
+	config                     config.Config
 	conn                       *grpc.ClientConn
 	address                    string
-	sessionRegistry            session.Registry
+	sessionRegistry            registry.Registry
 	eventService               proto.EventServiceClient
 	authorizeConnectionService proto.UserServiceClient
 	closing                    bool
 }
 
-func New(address string, sessionRegistry session.Registry) (Client, error) {
+func New(config config.Config, address string, sessionRegistry registry.Registry) (Client, error) {
 	var opts []grpc.DialOption
 
 	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -67,6 +67,7 @@ func New(address string, sessionRegistry session.Registry) (Client, error) {
 	authorizeConnectionService := proto.NewUserServiceClient(conn)
 
 	return &client{
+		config:                     config,
 		conn:                       conn,
 		address:                    address,
 		sessionRegistry:            sessionRegistry,
@@ -193,7 +194,7 @@ func (c *client) handleSlugChange(subscribe grpc.BidiStreamingClient[proto.Node,
 	oldSlug := slugEvent.GetOld()
 	newSlug := slugEvent.GetNew()
 
-	userSession, err := c.sessionRegistry.Get(types.SessionKey{Id: oldSlug, Type: types.HTTP})
+	userSession, err := c.sessionRegistry.Get(types.SessionKey{Id: oldSlug, Type: types.TunnelTypeHTTP})
 	if err != nil {
 		return c.sendNode(subscribe, &proto.Node{
 			Type: proto.EventType_SLUG_CHANGE_RESPONSE,
@@ -203,7 +204,7 @@ func (c *client) handleSlugChange(subscribe grpc.BidiStreamingClient[proto.Node,
 		}, "slug change failure response")
 	}
 
-	if err = c.sessionRegistry.Update(user, types.SessionKey{Id: oldSlug, Type: types.HTTP}, types.SessionKey{Id: newSlug, Type: types.HTTP}); err != nil {
+	if err = c.sessionRegistry.Update(user, types.SessionKey{Id: oldSlug, Type: types.TunnelTypeHTTP}, types.SessionKey{Id: newSlug, Type: types.TunnelTypeHTTP}); err != nil {
 		return c.sendNode(subscribe, &proto.Node{
 			Type: proto.EventType_SLUG_CHANGE_RESPONSE,
 			Payload: &proto.Node_SlugEventResponse{
@@ -228,7 +229,7 @@ func (c *client) handleGetSessions(subscribe grpc.BidiStreamingClient[proto.Node
 	for _, ses := range sessions {
 		detail := ses.Detail()
 		details = append(details, &proto.Detail{
-			Node:           config.Getenv("DOMAIN", "localhost"),
+			Node:           c.config.Domain(),
 			ForwardingType: detail.ForwardingType,
 			Slug:           detail.Slug,
 			UserId:         detail.UserID,
@@ -300,11 +301,11 @@ func (c *client) sendNode(subscribe grpc.BidiStreamingClient[proto.Node, proto.E
 func (c *client) protoToTunnelType(t proto.TunnelType) (types.TunnelType, error) {
 	switch t {
 	case proto.TunnelType_HTTP:
-		return types.HTTP, nil
+		return types.TunnelTypeHTTP, nil
 	case proto.TunnelType_TCP:
-		return types.TCP, nil
+		return types.TunnelTypeTCP, nil
 	default:
-		return types.UNKNOWN, fmt.Errorf("unknown tunnel type received")
+		return types.TunnelTypeUNKNOWN, fmt.Errorf("unknown tunnel type received")
 	}
 }
 

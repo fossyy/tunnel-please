@@ -10,6 +10,7 @@ import (
 	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/grpc/client"
 	"tunnel_pls/internal/port"
+	"tunnel_pls/internal/registry"
 	"tunnel_pls/session"
 
 	"golang.org/x/crypto/ssh"
@@ -20,38 +21,26 @@ type Server interface {
 	Close() error
 }
 type server struct {
-	listener        net.Listener
-	config          *ssh.ServerConfig
+	config          config.Config
+	sshPort         string
+	sshListener     net.Listener
+	sshConfig       *ssh.ServerConfig
 	grpcClient      client.Client
-	sessionRegistry session.Registry
-	portRegistry    port.Registry
+	sessionRegistry registry.Registry
+	portRegistry    port.Port
 }
 
-func New(sshConfig *ssh.ServerConfig, sessionRegistry session.Registry, grpcClient client.Client, portRegistry port.Registry) (Server, error) {
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", config.Getenv("PORT", "2200")))
+func New(config config.Config, sshConfig *ssh.ServerConfig, sessionRegistry registry.Registry, grpcClient client.Client, portRegistry port.Port, sshPort string) (Server, error) {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", sshPort))
 	if err != nil {
-		log.Fatalf("failed to listen on port 2200: %v", err)
 		return nil, err
-	}
-
-	HttpServer := NewHTTPServer(sessionRegistry)
-	err = HttpServer.ListenAndServe()
-	if err != nil {
-		log.Fatalf("failed to start http server: %v", err)
-		return nil, err
-	}
-
-	if config.Getenv("TLS_ENABLED", "false") == "true" {
-		err = HttpServer.ListenAndServeTLS()
-		if err != nil {
-			log.Fatalf("failed to start https server: %v", err)
-			return nil, err
-		}
 	}
 
 	return &server{
-		listener:        listener,
-		config:          sshConfig,
+		config:          config,
+		sshPort:         sshPort,
+		sshListener:     listener,
+		sshConfig:       sshConfig,
 		grpcClient:      grpcClient,
 		sessionRegistry: sessionRegistry,
 		portRegistry:    portRegistry,
@@ -59,9 +48,9 @@ func New(sshConfig *ssh.ServerConfig, sessionRegistry session.Registry, grpcClie
 }
 
 func (s *server) Start() {
-	log.Println("SSH server is starting on port 2200...")
+	log.Printf("SSH server is starting on port %s", s.sshPort)
 	for {
-		conn, err := s.listener.Accept()
+		conn, err := s.sshListener.Accept()
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				log.Println("listener closed, stopping server")
@@ -76,11 +65,11 @@ func (s *server) Start() {
 }
 
 func (s *server) Close() error {
-	return s.listener.Close()
+	return s.sshListener.Close()
 }
 
 func (s *server) handleConnection(conn net.Conn) {
-	sshConn, chans, forwardingReqs, err := ssh.NewServerConn(conn, s.config)
+	sshConn, chans, forwardingReqs, err := ssh.NewServerConn(conn, s.sshConfig)
 	if err != nil {
 		log.Printf("failed to establish SSH connection: %v", err)
 		err = conn.Close()
@@ -106,7 +95,7 @@ func (s *server) handleConnection(conn net.Conn) {
 		cancel()
 	}
 	log.Println("SSH connection established:", sshConn.User())
-	sshSession := session.New(sshConn, forwardingReqs, chans, s.sessionRegistry, s.portRegistry, user)
+	sshSession := session.New(s.config, sshConn, forwardingReqs, chans, s.sessionRegistry, s.portRegistry, user)
 	err = sshSession.Start()
 	if err != nil {
 		log.Printf("SSH session ended with error: %v", err)

@@ -4,21 +4,22 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/grpc/client"
 	"tunnel_pls/internal/key"
 	"tunnel_pls/internal/port"
+	"tunnel_pls/internal/registry"
+	"tunnel_pls/internal/transport"
+	"tunnel_pls/internal/version"
 	"tunnel_pls/server"
-	"tunnel_pls/session"
-	"tunnel_pls/version"
+	"tunnel_pls/types"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -34,25 +35,10 @@ func main() {
 
 	log.Printf("Starting %s", version.GetVersion())
 
-	err := config.Load()
+	conf, err := config.MustLoad()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %s", err)
 		return
-	}
-
-	mode := strings.ToLower(config.Getenv("MODE", "standalone"))
-	isNodeMode := mode == "node"
-
-	pprofEnabled := config.Getenv("PPROF_ENABLED", "false")
-	if pprofEnabled == "true" {
-		pprofPort := config.Getenv("PPROF_PORT", "6060")
-		go func() {
-			pprofAddr := fmt.Sprintf("localhost:%s", pprofPort)
-			log.Printf("Starting pprof server on http://%s/debug/pprof/", pprofAddr)
-			if err = http.ListenAndServe(pprofAddr, nil); err != nil {
-				log.Printf("pprof server error: %v", err)
-			}
-		}()
 	}
 
 	sshConfig := &ssh.ServerConfig{
@@ -76,7 +62,7 @@ func main() {
 	}
 
 	sshConfig.AddHostKey(private)
-	sessionRegistry := session.NewRegistry()
+	sessionRegistry := registry.NewRegistry()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -86,16 +72,11 @@ func main() {
 	signal.Notify(shutdownChan, os.Interrupt, syscall.SIGTERM)
 
 	var grpcClient client.Client
-	if isNodeMode {
-		grpcHost := config.Getenv("GRPC_ADDRESS", "localhost")
-		grpcPort := config.Getenv("GRPC_PORT", "8080")
-		grpcAddr := fmt.Sprintf("%s:%s", grpcHost, grpcPort)
-		nodeToken := config.Getenv("NODE_TOKEN", "")
-		if nodeToken == "" {
-			log.Fatalf("NODE_TOKEN is required in node mode")
-		}
 
-		grpcClient, err = client.New(grpcAddr, sessionRegistry)
+	if conf.Mode() == types.ServerModeNODE {
+		grpcAddr := fmt.Sprintf("%s:%s", conf.GRPCAddress(), conf.GRPCPort())
+
+		grpcClient, err = client.New(conf, grpcAddr, sessionRegistry)
 		if err != nil {
 			log.Fatalf("failed to create grpc client: %v", err)
 		}
@@ -108,46 +89,72 @@ func main() {
 		healthCancel()
 
 		go func() {
-			identity := config.Getenv("DOMAIN", "localhost")
-			if err = grpcClient.SubscribeEvents(ctx, identity, nodeToken); err != nil {
+			if err = grpcClient.SubscribeEvents(ctx, conf.Domain(), conf.NodeToken()); err != nil {
 				errChan <- fmt.Errorf("failed to subscribe to events: %w", err)
 			}
 		}()
 	}
 
-	portManager := port.New()
-	rawRange := config.Getenv("ALLOWED_PORTS", "")
-	if rawRange != "" {
-		splitRange := strings.Split(rawRange, "-")
-		if len(splitRange) == 2 {
-			var start, end uint64
-			start, err = strconv.ParseUint(splitRange[0], 10, 16)
-			if err != nil {
-				log.Fatalf("Failed to parse start port: %s", err)
-			}
-
-			end, err = strconv.ParseUint(splitRange[1], 10, 16)
-			if err != nil {
-				log.Fatalf("Failed to parse end port: %s", err)
-			}
-
-			if err = portManager.AddPortRange(uint16(start), uint16(end)); err != nil {
-				log.Fatalf("Failed to add port range: %s", err)
-			}
-			log.Printf("PortRegistry range configured: %d-%d", start, end)
-		} else {
-			log.Printf("Invalid ALLOWED_PORTS format, expected 'start-end', got: %s", rawRange)
+	go func() {
+		var httpListener net.Listener
+		httpserver := transport.NewHTTPServer(conf.Domain(), conf.HTTPPort(), sessionRegistry, conf.TLSRedirect())
+		httpListener, err = httpserver.Listen()
+		if err != nil {
+			errChan <- fmt.Errorf("failed to start http server: %w", err)
+			return
 		}
+		err = httpserver.Serve(httpListener)
+		if err != nil {
+			errChan <- fmt.Errorf("error when serving http server: %w", err)
+			return
+		}
+	}()
+
+	if conf.TLSEnabled() {
+		go func() {
+			var httpsListener net.Listener
+			tlsConfig, _ := transport.NewTLSConfig(conf)
+			httpsServer := transport.NewHTTPSServer(conf.Domain(), conf.HTTPSPort(), sessionRegistry, conf.TLSRedirect(), tlsConfig)
+			httpsListener, err = httpsServer.Listen()
+			if err != nil {
+				errChan <- fmt.Errorf("failed to start http server: %w", err)
+				return
+			}
+			err = httpsServer.Serve(httpsListener)
+			if err != nil {
+				errChan <- fmt.Errorf("error when serving http server: %w", err)
+				return
+			}
+		}()
 	}
+	
+	portManager := port.New()
+	err = portManager.AddRange(conf.AllowedPortsStart(), conf.AllowedPortsEnd())
+	if err != nil {
+		log.Fatalf("Failed to initialize port manager: %s", err)
+		return
+	}
+
 	var app server.Server
 	go func() {
-		app, err = server.New(sshConfig, sessionRegistry, grpcClient, portManager)
+		app, err = server.New(conf, sshConfig, sessionRegistry, grpcClient, portManager, conf.SSHPort())
 		if err != nil {
 			errChan <- fmt.Errorf("failed to start server: %s", err)
 			return
 		}
 		app.Start()
+
 	}()
+
+	if conf.PprofEnabled() {
+		go func() {
+			pprofAddr := fmt.Sprintf("localhost:%s", conf.PprofPort())
+			log.Printf("Starting pprof server on http://%s/debug/pprof/", pprofAddr)
+			if err = http.ListenAndServe(pprofAddr, nil); err != nil {
+				log.Printf("pprof server error: %v", err)
+			}
+		}()
+	}
 
 	select {
 	case err = <-errChan:

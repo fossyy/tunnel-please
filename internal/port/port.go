@@ -6,37 +6,37 @@ import (
 	"sync"
 )
 
-type Registry interface {
-	AddPortRange(startPort, endPort uint16) error
-	GetUnassignedPort() (uint16, bool)
-	SetPortStatus(port uint16, assigned bool) error
-	ClaimPort(port uint16) (claimed bool)
+type Port interface {
+	AddRange(startPort, endPort uint16) error
+	Unassigned() (uint16, bool)
+	SetStatus(port uint16, assigned bool) error
+	Claim(port uint16) (claimed bool)
 }
 
-type registry struct {
+type port struct {
 	mu          sync.RWMutex
 	ports       map[uint16]bool
 	sortedPorts []uint16
 }
 
-func New() Registry {
-	return &registry{
+func New() Port {
+	return &port{
 		ports:       make(map[uint16]bool),
 		sortedPorts: []uint16{},
 	}
 }
 
-func (pm *registry) AddPortRange(startPort, endPort uint16) error {
+func (pm *port) AddRange(startPort, endPort uint16) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
 	if startPort > endPort {
 		return fmt.Errorf("start port cannot be greater than end port")
 	}
-	for port := startPort; port <= endPort; port++ {
-		if _, exists := pm.ports[port]; !exists {
-			pm.ports[port] = false
-			pm.sortedPorts = append(pm.sortedPorts, port)
+	for index := startPort; index <= endPort; index++ {
+		if _, exists := pm.ports[index]; !exists {
+			pm.ports[index] = false
+			pm.sortedPorts = append(pm.sortedPorts, index)
 		}
 	}
 	sort.Slice(pm.sortedPorts, func(i, j int) bool {
@@ -45,19 +45,19 @@ func (pm *registry) AddPortRange(startPort, endPort uint16) error {
 	return nil
 }
 
-func (pm *registry) GetUnassignedPort() (uint16, bool) {
+func (pm *port) Unassigned() (uint16, bool) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	for _, port := range pm.sortedPorts {
-		if !pm.ports[port] {
-			return port, true
+	for _, index := range pm.sortedPorts {
+		if !pm.ports[index] {
+			return index, true
 		}
 	}
 	return 0, false
 }
 
-func (pm *registry) SetPortStatus(port uint16, assigned bool) error {
+func (pm *port) SetStatus(port uint16, assigned bool) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -65,7 +65,7 @@ func (pm *registry) SetPortStatus(port uint16, assigned bool) error {
 	return nil
 }
 
-func (pm *registry) ClaimPort(port uint16) (claimed bool) {
+func (pm *port) Claim(port uint16) (claimed bool) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 

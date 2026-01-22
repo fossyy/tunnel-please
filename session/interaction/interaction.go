@@ -18,9 +18,9 @@ import (
 )
 
 type Interaction interface {
-	Mode() types.Mode
+	Mode() types.InteractiveMode
 	SetChannel(channel ssh.Channel)
-	SetMode(m types.Mode)
+	SetMode(m types.InteractiveMode)
 	SetWH(w, h int)
 	Start()
 	Redraw()
@@ -39,6 +39,7 @@ type Forwarder interface {
 
 type CloseFunc func() error
 type interaction struct {
+	config          config.Config
 	channel         ssh.Channel
 	slug            slug.Slug
 	forwarder       Forwarder
@@ -48,14 +49,14 @@ type interaction struct {
 	program         *tea.Program
 	ctx             context.Context
 	cancel          context.CancelFunc
-	mode            types.Mode
+	mode            types.InteractiveMode
 }
 
-func (i *interaction) SetMode(m types.Mode) {
+func (i *interaction) SetMode(m types.InteractiveMode) {
 	i.mode = m
 }
 
-func (i *interaction) Mode() types.Mode {
+func (i *interaction) Mode() types.InteractiveMode {
 	return i.mode
 }
 
@@ -75,9 +76,10 @@ func (i *interaction) SetWH(w, h int) {
 	}
 }
 
-func New(slug slug.Slug, forwarder Forwarder, sessionRegistry SessionRegistry, user string, closeFunc CloseFunc) Interaction {
+func New(config config.Config, slug slug.Slug, forwarder Forwarder, sessionRegistry SessionRegistry, user string, closeFunc CloseFunc) Interaction {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &interaction{
+		config:          config,
 		channel:         nil,
 		slug:            slug,
 		forwarder:       forwarder,
@@ -174,14 +176,13 @@ func (m *model) View() string {
 }
 
 func (i *interaction) Start() {
-	if i.mode == types.HEADLESS {
+	if i.mode == types.InteractiveModeHEADLESS {
 		return
 	}
 	lipgloss.SetColorProfile(termenv.TrueColor)
 
-	domain := config.Getenv("DOMAIN", "localhost")
 	protocol := "http"
-	if config.Getenv("TLS_ENABLED", "false") == "true" {
+	if i.config.TLSEnabled() {
 		protocol = "https"
 	}
 
@@ -209,7 +210,7 @@ func (i *interaction) Start() {
 	ti.Width = 50
 
 	m := &model{
-		domain:      domain,
+		domain:      i.config.Domain(),
 		protocol:    protocol,
 		tunnelType:  tunnelType,
 		port:        port,

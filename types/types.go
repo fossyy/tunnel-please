@@ -1,30 +1,47 @@
 package types
 
-type Status int
+import "time"
+
+type SessionStatus int
 
 const (
-	INITIALIZING Status = iota
-	RUNNING
+	SessionStatusINITIALIZING SessionStatus = iota
+	SessionStatusRUNNING
 )
 
-type Mode int
+type InteractiveMode int
 
 const (
-	INTERACTIVE Mode = iota
-	HEADLESS
+	InteractiveModeINTERACTIVE InteractiveMode = iota + 1
+	InteractiveModeHEADLESS
 )
 
 type TunnelType int
 
 const (
-	UNKNOWN TunnelType = iota
-	HTTP
-	TCP
+	TunnelTypeUNKNOWN TunnelType = iota
+	TunnelTypeHTTP
+	TunnelTypeTCP
+)
+
+type ServerMode int
+
+const (
+	ServerModeSTANDALONE = iota + 1
+	ServerModeNODE
 )
 
 type SessionKey struct {
 	Id   string
 	Type TunnelType
+}
+
+type Detail struct {
+	ForwardingType string    `json:"forwarding_type,omitempty"`
+	Slug           string    `json:"slug,omitempty"`
+	UserID         string    `json:"user_id,omitempty"`
+	Active         bool      `json:"active,omitempty"`
+	StartedAt      time.Time `json:"started_at,omitempty"`
 }
 
 var BadGatewayResponse = []byte("HTTP/1.1 502 Bad Gateway\r\n" +
