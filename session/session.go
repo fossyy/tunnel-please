@@ -87,12 +87,12 @@ func (s *session) Slug() slug.Slug {
 
 func (s *session) Detail() *types.Detail {
 	tunnelTypeMap := map[types.TunnelType]string{
-		types.TunnelTypeHTTP: "TunnelTypeHTTP",
-		types.TunnelTypeTCP:  "TunnelTypeTCP",
+		types.TunnelTypeHTTP: "HTTP",
+		types.TunnelTypeTCP:  "TCP",
 	}
 	tunnelType, ok := tunnelTypeMap[s.forwarder.TunnelType()]
 	if !ok {
-		tunnelType = "TunnelTypeUNKNOWN"
+		tunnelType = "UNKNOWN"
 	}
 
 	return &types.Detail{
