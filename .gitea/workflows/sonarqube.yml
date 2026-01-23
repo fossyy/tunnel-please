@@ -23,8 +23,22 @@ jobs:
       - name: Install dependencies
         run: go mod tidy
 
+      - name: Run go vet
+        run: go vet ./... 2>&1 | tee vet-results.txt
+
       - name: Run tests with coverage
-        run: go test ./... -coverprofile=coverage -json > test-results.json
+        run: |
+          go test ./... -v -coverprofile=coverage
+
+      - name: Run GolangCI-Lint Analysis
+        uses: golangci/golangci-lint-action@v9
+        with:
+          skip-cache: true
+          version: v2.6
+          args: >
+            --issues-exit-code=0
+            --output.text.path=stdout
+            --output.checkstyle.path=golangci-lint-report.xml
 
       - name: Set SonarQube project key
         run: |
@@ -49,5 +63,6 @@ jobs:
             -Dsonar.go.coverage.reportPaths=coverage
             -Dsonar.test.inclusions=**/*_test.go
             -Dsonar.test.exclusions=**/vendor/**
-            -Dsonar.exclusions=**/*_test.go,**/vendor/**
-            -Dsonar.go.tests.reportPaths=test-results.json
+            -Dsonar.exclusions=**/*_test.go,**/vendor/**,**/golangci-lint-report.xml
+            -Dsonar.go.govet.reportPaths=vet-results.txt
+            -Dsonar.go.golangci-lint.reportPaths=golangci-lint-report.xml
