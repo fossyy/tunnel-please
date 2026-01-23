@@ -58,7 +58,7 @@ func New(config config.Config, slug slug.Slug, conn ssh.Conn) Forwarder {
 
 func (f *forwarder) copyWithBuffer(dst io.Writer, src io.Reader) (written int64, err error) {
 	buf := f.bufferPool.Get().([]byte)
-	defer f.bufferPool.Put(buf)
+	defer f.bufferPool.Put(&buf)
 	return io.CopyBuffer(dst, src, buf)
 }
 
