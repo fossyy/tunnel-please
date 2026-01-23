@@ -30,7 +30,6 @@ type http struct {
 	remoteAddr net.Addr
 	writer     io.Writer
 	reader     io.Reader
-	headerBuf  []byte
 	buf        []byte
 	respHeader header.ResponseHeader
 	reqHeader  header.RequestHeader
