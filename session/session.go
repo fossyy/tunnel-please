@@ -48,24 +48,35 @@ type session struct {
 	registry    registry.Registry
 }
 
+type Config struct {
+	Randomizer      random.Random
+	Config          config.Config
+	Conn            *ssh.ServerConn
+	InitialReq      <-chan *ssh.Request
+	SshChan         <-chan ssh.NewChannel
+	SessionRegistry registry.Registry
+	PortRegistry    portUtil.Port
+	User            string
+}
+
 var blockedReservedPorts = []uint16{1080, 1433, 1521, 1900, 2049, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 9000, 9200, 27017}
 
-func New(randomizer random.Random, config config.Config, conn *ssh.ServerConn, initialReq <-chan *ssh.Request, sshChan <-chan ssh.NewChannel, sessionRegistry registry.Registry, portRegistry portUtil.Port, user string) Session {
+func New(conf *Config) Session {
 	slugManager := slug.New()
-	forwarderManager := forwarder.New(config, slugManager, conn)
-	lifecycleManager := lifecycle.New(conn, forwarderManager, slugManager, portRegistry, sessionRegistry, user)
-	interactionManager := interaction.New(randomizer, config, slugManager, forwarderManager, sessionRegistry, user, lifecycleManager.Close)
+	forwarderManager := forwarder.New(conf.Config, slugManager, conf.Conn)
+	lifecycleManager := lifecycle.New(conf.Conn, forwarderManager, slugManager, conf.PortRegistry, conf.SessionRegistry, conf.User)
+	interactionManager := interaction.New(conf.Randomizer, conf.Config, slugManager, forwarderManager, conf.SessionRegistry, conf.User, lifecycleManager.Close)
 
 	return &session{
-		randomizer:  randomizer,
-		config:      config,
-		initialReq:  initialReq,
-		sshChan:     sshChan,
+		randomizer:  conf.Randomizer,
+		config:      conf.Config,
+		initialReq:  conf.InitialReq,
+		sshChan:     conf.SshChan,
 		lifecycle:   lifecycleManager,
 		interaction: interactionManager,
 		forwarder:   forwarderManager,
 		slug:        slugManager,
-		registry:    sessionRegistry,
+		registry:    conf.SessionRegistry,
 	}
 }
 

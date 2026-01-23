@@ -99,7 +99,16 @@ func (s *server) handleConnection(conn net.Conn) {
 		cancel()
 	}
 	log.Println("SSH connection established:", sshConn.User())
-	sshSession := session.New(s.randomizer, s.config, sshConn, forwardingReqs, chans, s.sessionRegistry, s.portRegistry, user)
+	sshSession := session.New(&session.Config{
+		Randomizer:      s.randomizer,
+		Config:          s.config,
+		Conn:            sshConn,
+		InitialReq:      forwardingReqs,
+		SshChan:         chans,
+		SessionRegistry: s.sessionRegistry,
+		PortRegistry:    s.portRegistry,
+		User:            user,
+	})
 	err = sshSession.Start()
 	if err != nil {
 		log.Printf("SSH session ended with error: %s", err.Error())
