@@ -126,7 +126,7 @@ func (s *session) Start() error {
 	}
 
 	if s.shouldRejectUnauthorized() {
-		return s.denyForwardingRequest(tcpipReq, nil, nil, fmt.Sprintf("headless forwarding only allowed on node mode"))
+		return s.denyForwardingRequest(tcpipReq, nil, nil, "headless forwarding only allowed on node mode")
 	}
 
 	if err := s.HandleTCPIPForward(tcpipReq); err != nil {
