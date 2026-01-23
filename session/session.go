@@ -195,7 +195,6 @@ func (s *session) waitForSessionEnd() error {
 	}
 
 	if err := s.lifecycle.Close(); err != nil {
-		log.Printf("failed to close session: %v", err)
 		return err
 	}
 	return nil

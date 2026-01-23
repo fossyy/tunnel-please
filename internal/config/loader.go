@@ -18,6 +18,8 @@ type config struct {
 	httpPort  string
 	httpsPort string
 
+	keyLoc string
+
 	tlsEnabled  bool
 	tlsRedirect bool
 
@@ -50,6 +52,8 @@ func parse() (*config, error) {
 
 	httpPort := getenv("HTTP_PORT", "8080")
 	httpsPort := getenv("HTTPS_PORT", "8443")
+
+	keyLoc := getenv("KEY_LOC", "certs/privkey.pem")
 
 	tlsEnabled := getenvBool("TLS_ENABLED", false)
 	tlsRedirect := tlsEnabled && getenvBool("TLS_REDIRECT", false)
@@ -85,6 +89,7 @@ func parse() (*config, error) {
 		sshPort:           sshPort,
 		httpPort:          httpPort,
 		httpsPort:         httpsPort,
+		keyLoc:            keyLoc,
 		tlsEnabled:        tlsEnabled,
 		tlsRedirect:       tlsRedirect,
 		acmeEmail:         acmeEmail,

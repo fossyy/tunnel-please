@@ -9,6 +9,8 @@ type Config interface {
 	HTTPPort() string
 	HTTPSPort() string
 
+	KeyLoc() string
+
 	TLSEnabled() bool
 	TLSRedirect() bool
 
@@ -47,6 +49,7 @@ func (c *config) Domain() string            { return c.domain }
 func (c *config) SSHPort() string           { return c.sshPort }
 func (c *config) HTTPPort() string          { return c.httpPort }
 func (c *config) HTTPSPort() string         { return c.httpsPort }
+func (c *config) KeyLoc() string            { return c.keyLoc }
 func (c *config) TLSEnabled() bool          { return c.tlsEnabled }
 func (c *config) TLSRedirect() bool         { return c.tlsRedirect }
 func (c *config) ACMEEmail() string         { return c.acmeEmail }

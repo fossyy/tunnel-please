@@ -123,12 +123,8 @@ func (l *lifecycle) Close() error {
 	l.sessionRegistry.Remove(key)
 
 	if tunnelType == types.TunnelTypeTCP {
-		if err := l.PortRegistry().SetStatus(l.forwarder.ForwardedPort(), false); err != nil {
-			errs = append(errs, err)
-		}
-		if err := l.forwarder.Close(); err != nil {
-			errs = append(errs, err)
-		}
+		errs = append(errs, l.PortRegistry().SetStatus(l.forwarder.ForwardedPort(), false))
+		errs = append(errs, l.forwarder.Close())
 	}
 
 	l.closeErr = errors.Join(errs...)

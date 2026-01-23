@@ -49,6 +49,7 @@ func (m *mockConfig) Mode() types.ServerMode    { return m.Called().Get(0).(type
 func (m *mockConfig) GRPCAddress() string       { return m.Called().String(0) }
 func (m *mockConfig) GRPCPort() string          { return m.Called().String(0) }
 func (m *mockConfig) NodeToken() string         { return m.Called().String(0) }
+func (m *mockConfig) KeyLoc() string            { return m.Called().String(0) }
 
 type mockRegistry struct {
 	mock.Mock

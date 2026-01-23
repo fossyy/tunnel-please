@@ -114,5 +114,4 @@ func (s *server) handleConnection(conn net.Conn) {
 		log.Printf("SSH session ended with error: %s", err.Error())
 		return
 	}
-	return
 }
