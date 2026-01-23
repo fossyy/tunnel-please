@@ -412,8 +412,10 @@ func readSSHString(reader io.Reader) (string, error) {
 		return "", err
 	}
 	strBytes := make([]byte, length)
-	if _, err := reader.Read(strBytes); err != nil {
-		return "", err
+	if length > 0 {
+		if _, err := io.ReadFull(reader, strBytes); err != nil {
+			return "", err
+		}
 	}
 	return string(strBytes), nil
 }
