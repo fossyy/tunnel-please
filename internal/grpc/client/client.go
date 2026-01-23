@@ -38,6 +38,12 @@ type client struct {
 	closing                    bool
 }
 
+var (
+	grpcNewClient         = grpc.NewClient
+	healthNewHealthClient = grpc_health_v1.NewHealthClient
+	initialBackoff        = time.Second
+)
+
 func New(config config.Config, address string, sessionRegistry registry.Registry) (Client, error) {
 	var opts []grpc.DialOption
 
@@ -58,7 +64,7 @@ func New(config config.Config, address string, sessionRegistry registry.Registry
 		),
 	)
 
-	conn, err := grpc.NewClient(address, opts...)
+	conn, err := grpcNewClient(address, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to gRPC server at %s: %w", address, err)
 	}
@@ -77,7 +83,7 @@ func New(config config.Config, address string, sessionRegistry registry.Registry
 }
 
 func (c *client) SubscribeEvents(ctx context.Context, identity, authToken string) error {
-	backoff := time.Second
+	backoff := initialBackoff
 
 	for {
 		if err := c.subscribeAndProcess(ctx, identity, authToken, &backoff); err != nil {
@@ -109,11 +115,7 @@ func (c *client) subscribeAndProcess(ctx context.Context, identity, authToken st
 	log.Println("Authentication Successfully sent to gRPC server")
 	*backoff = time.Second
 
-	if err = c.processEventStream(subscribe); err != nil {
-		return c.handleStreamError(ctx, err, backoff)
-	}
-
-	return nil
+	return c.handleStreamError(ctx, c.processEventStream(subscribe), backoff)
 }
 
 func (c *client) handleSubscribeError(ctx context.Context, err error, backoff *time.Duration) error {
@@ -332,7 +334,7 @@ func (c *client) AuthorizeConn(ctx context.Context, token string) (authorized bo
 }
 
 func (c *client) CheckServerHealth(ctx context.Context) error {
-	healthClient := grpc_health_v1.NewHealthClient(c.ClientConn())
+	healthClient := healthNewHealthClient(c.ClientConn())
 	resp, err := healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{
 		Service: "",
 	})
