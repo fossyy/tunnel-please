@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"io"
 	"log"
 	"os"
@@ -26,6 +27,7 @@ var (
 )
 
 func GenerateSSHKeyIfNotExist(keyPath string) error {
+	var errGroup = make([]error, 0)
 	if _, err := os.Stat(keyPath); err == nil {
 		log.Printf("SSH key already exists at %s", keyPath)
 		return nil
@@ -52,7 +54,9 @@ func GenerateSSHKeyIfNotExist(keyPath string) error {
 	if err != nil {
 		return err
 	}
-	defer privateKeyFile.Close()
+	defer func(privateKeyFile *os.File) {
+		errGroup = append(errGroup, privateKeyFile.Close())
+	}(privateKeyFile)
 
 	if err := pemEncode(privateKeyFile, privateKeyPEM); err != nil {
 		return err
@@ -68,7 +72,9 @@ func GenerateSSHKeyIfNotExist(keyPath string) error {
 	if err != nil {
 		return err
 	}
-	defer pubKeyFile.Close()
+	defer func(pubKeyFile *os.File) {
+		errGroup = append(errGroup, pubKeyFile.Close())
+	}(pubKeyFile)
 
 	_, err = pubKeyWrite(pubKeyFile, ssh.MarshalAuthorizedKey(publicKey))
 	if err != nil {
@@ -76,5 +82,5 @@ func GenerateSSHKeyIfNotExist(keyPath string) error {
 	}
 
 	log.Printf("SSH key pair generated successfully at %s and %s", keyPath, pubKeyPath)
-	return nil
+	return errors.Join(errGroup...)
 }
