@@ -57,6 +57,7 @@ func parse() (*config, error) {
 
 	tlsEnabled := getenvBool("TLS_ENABLED", false)
 	tlsRedirect := tlsEnabled && getenvBool("TLS_REDIRECT", false)
+	tlsStoragePath := getenv("TLS_STORAGE_PATH", "certs/tls/")
 
 	acmeEmail := getenv("ACME_EMAIL", "admin@"+domain)
 	acmeStaging := getenvBool("ACME_STAGING", false)
@@ -92,6 +93,7 @@ func parse() (*config, error) {
 		keyLoc:            keyLoc,
 		tlsEnabled:        tlsEnabled,
 		tlsRedirect:       tlsRedirect,
+		tlsStoragePath:    tlsStoragePath,
 		acmeEmail:         acmeEmail,
 		cfAPIToken:        cfToken,
 		acmeStaging:       acmeStaging,

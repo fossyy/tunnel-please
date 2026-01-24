@@ -267,23 +267,24 @@ func TestParse(t *testing.T) {
 
 func TestGetters(t *testing.T) {
 	envs := map[string]string{
-		"DOMAIN":        "example.com",
-		"PORT":          "2222",
-		"HTTP_PORT":     "80",
-		"HTTPS_PORT":    "443",
-		"TLS_ENABLED":   "true",
-		"TLS_REDIRECT":  "true",
-		"ACME_EMAIL":    "test@example.com",
-		"CF_API_TOKEN":  "token",
-		"ACME_STAGING":  "true",
-		"ALLOWED_PORTS": "1000-2000",
-		"BUFFER_SIZE":   "16384",
-		"PPROF_ENABLED": "true",
-		"PPROF_PORT":    "7070",
-		"MODE":          "standalone",
-		"GRPC_ADDRESS":  "127.0.0.1",
-		"GRPC_PORT":     "9090",
-		"NODE_TOKEN":    "ntoken",
+		"DOMAIN":           "example.com",
+		"PORT":             "2222",
+		"HTTP_PORT":        "80",
+		"HTTPS_PORT":       "443",
+		"TLS_ENABLED":      "true",
+		"TLS_REDIRECT":     "true",
+		"TLS_STORAGE_PATH": "certs/tls/",
+		"ACME_EMAIL":       "test@example.com",
+		"CF_API_TOKEN":     "token",
+		"ACME_STAGING":     "true",
+		"ALLOWED_PORTS":    "1000-2000",
+		"BUFFER_SIZE":      "16384",
+		"PPROF_ENABLED":    "true",
+		"PPROF_PORT":       "7070",
+		"MODE":             "standalone",
+		"GRPC_ADDRESS":     "127.0.0.1",
+		"GRPC_PORT":        "9090",
+		"NODE_TOKEN":       "ntoken",
 	}
 
 	os.Clearenv()
@@ -300,6 +301,7 @@ func TestGetters(t *testing.T) {
 	assert.Equal(t, "443", cfg.HTTPSPort())
 	assert.Equal(t, true, cfg.TLSEnabled())
 	assert.Equal(t, true, cfg.TLSRedirect())
+	assert.Equal(t, "certs/tls/", cfg.TLSStoragePath())
 	assert.Equal(t, "test@example.com", cfg.ACMEEmail())
 	assert.Equal(t, "token", cfg.CFAPIToken())
 	assert.Equal(t, true, cfg.ACMEStaging())
