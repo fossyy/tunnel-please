@@ -33,6 +33,10 @@ func (m *mockSession) Detail() *types.Detail {
 
 type mockLifecycle struct{ user string }
 
+func (ml *mockLifecycle) Channel() ssh.Channel {
+	return nil
+}
+
 func (ml *mockLifecycle) Connection() ssh.Conn                 { return nil }
 func (ml *mockLifecycle) PortRegistry() port.Port              { return nil }
 func (ml *mockLifecycle) SetChannel(channel ssh.Channel)       { _ = channel }

@@ -100,6 +100,11 @@ type MockLifecycle struct {
 	mock.Mock
 }
 
+func (m *MockLifecycle) Channel() ssh.Channel {
+	args := m.Called()
+	return args.Get(0).(ssh.Channel)
+}
+
 func (m *MockLifecycle) Connection() ssh.Conn {
 	args := m.Called()
 	return args.Get(0).(ssh.Conn)

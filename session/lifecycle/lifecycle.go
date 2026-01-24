@@ -54,6 +54,7 @@ func New(conn ssh.Conn, forwarder Forwarder, slugManager slug.Slug, port portUti
 
 type Lifecycle interface {
 	Connection() ssh.Conn
+	Channel() ssh.Channel
 	PortRegistry() portUtil.Port
 	User() string
 	SetChannel(channel ssh.Channel)
@@ -74,16 +75,19 @@ func (l *lifecycle) User() string {
 func (l *lifecycle) SetChannel(channel ssh.Channel) {
 	l.channel = channel
 }
+
+func (l *lifecycle) Channel() ssh.Channel {
+	return l.channel
+}
+
 func (l *lifecycle) Connection() ssh.Conn {
 	return l.conn
 }
+
 func (l *lifecycle) SetStatus(status types.SessionStatus) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.status = status
-	if status == types.SessionStatusRUNNING && l.startedAt.IsZero() {
-		l.startedAt = time.Now()
-	}
 }
 
 func (l *lifecycle) IsActive() bool {
