@@ -28,27 +28,35 @@ type Bootstrap struct {
 	Config          config.Config
 	SessionRegistry registry.Registry
 	Port            port.Port
+	GrpcClient      client.Client
+	ErrChan         chan error
+	SignalChan      chan os.Signal
 }
 
-func New() (*Bootstrap, error) {
-	conf, err := config.MustLoad()
+func New(config config.Config, port port.Port) (*Bootstrap, error) {
+	randomizer := random.New()
+	sessionRegistry := registry.NewRegistry()
+
+	if err := port.AddRange(config.AllowedPortsStart(), config.AllowedPortsEnd()); err != nil {
+		return nil, err
+	}
+
+	grpcClient, err := client.New(config, sessionRegistry)
 	if err != nil {
 		return nil, err
 	}
 
-	randomizer := random.New()
-	sessionRegistry := registry.NewRegistry()
-
-	portManager := port.New()
-	if err = portManager.AddRange(conf.AllowedPortsStart(), conf.AllowedPortsEnd()); err != nil {
-		return nil, err
-	}
+	errChan := make(chan error, 5)
+	signalChan := make(chan os.Signal, 1)
 
 	return &Bootstrap{
 		Randomizer:      randomizer,
-		Config:          conf,
+		Config:          config,
 		SessionRegistry: sessionRegistry,
-		Port:            portManager,
+		Port:            port,
+		GrpcClient:      grpcClient,
+		ErrChan:         errChan,
+		SignalChan:      signalChan,
 	}, nil
 }
 
@@ -73,25 +81,20 @@ func newSSHConfig(sshKeyPath string) (*ssh.ServerConfig, error) {
 	return sshCfg, nil
 }
 
-func startGRPCClient(ctx context.Context, conf config.Config, registry registry.Registry, errChan chan<- error) (client.Client, error) {
-	grpcAddr := fmt.Sprintf("%s:%s", conf.GRPCAddress(), conf.GRPCPort())
-	grpcClient, err := client.New(conf, grpcAddr, registry)
-	if err != nil {
-		return nil, err
-	}
+func (b *Bootstrap) startGRPCClient(ctx context.Context, conf config.Config, errChan chan<- error) error {
 	healthCtx, healthCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer healthCancel()
-	if err = grpcClient.CheckServerHealth(healthCtx); err != nil {
-		return nil, fmt.Errorf("gRPC health check failed: %w", err)
+	if err := b.GrpcClient.CheckServerHealth(healthCtx); err != nil {
+		return fmt.Errorf("gRPC health check failed: %w", err)
 	}
 
 	go func() {
-		if err = grpcClient.SubscribeEvents(ctx, conf.Domain(), conf.NodeToken()); err != nil {
+		if err := b.GrpcClient.SubscribeEvents(ctx, conf.Domain(), conf.NodeToken()); err != nil {
 			errChan <- fmt.Errorf("failed to subscribe to events: %w", err)
 		}
 	}()
 
-	return grpcClient, nil
+	return nil
 }
 
 func startHTTPServer(conf config.Config, registry registry.Registry, errChan chan<- error) {
@@ -115,7 +118,7 @@ func startHTTPSServer(conf config.Config, registry registry.Registry, errChan ch
 	httpsServer := transport.NewHTTPSServer(conf.Domain(), conf.HTTPSPort(), registry, conf.TLSRedirect(), tlsCfg)
 	ln, err := httpsServer.Listen()
 	if err != nil {
-		errChan <- fmt.Errorf("failed to start https server: %w", err)
+		errChan <- fmt.Errorf("failed to create TLS config: %w", err)
 		return
 	}
 	if err = httpsServer.Serve(ln); err != nil {
@@ -123,25 +126,25 @@ func startHTTPSServer(conf config.Config, registry registry.Registry, errChan ch
 	}
 }
 
-func startSSHServer(rand random.Random, conf config.Config, sshCfg *ssh.ServerConfig, registry registry.Registry, grpcClient client.Client, portManager port.Port, sshPort string) error {
-	sshServer, err := server.New(rand, conf, sshCfg, registry, grpcClient, portManager, sshPort)
+func startSSHServer(rand random.Random, conf config.Config, sshCfg *ssh.ServerConfig, registry registry.Registry, grpcClient client.Client, portManager port.Port, errChan chan<- error) {
+	sshServer, err := server.New(rand, conf, sshCfg, registry, grpcClient, portManager, conf.SSHPort())
 	if err != nil {
-		return err
+		errChan <- err
+		return
 	}
 
 	sshServer.Start()
 
-	return sshServer.Close()
+	errChan <- sshServer.Close()
 }
 
-func startPprof(pprofPort string) {
+func startPprof(pprofPort string, errChan chan<- error) {
 	pprofAddr := fmt.Sprintf("localhost:%s", pprofPort)
 	log.Printf("Starting pprof server on http://%s/debug/pprof/", pprofAddr)
 	if err := http.ListenAndServe(pprofAddr, nil); err != nil {
-		log.Printf("pprof server error: %v", err)
+		errChan <- fmt.Errorf("pprof server error: %v", err)
 	}
 }
-
 func (b *Bootstrap) Run() error {
 	sshConfig, err := newSSHConfig(b.Config.KeyLoc())
 	if err != nil {
@@ -151,13 +154,10 @@ func (b *Bootstrap) Run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	errChan := make(chan error, 5)
-	shutdownChan := make(chan os.Signal, 1)
-	signal.Notify(shutdownChan, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(b.SignalChan, os.Interrupt, syscall.SIGTERM)
 
-	var grpcClient client.Client
 	if b.Config.Mode() == types.ServerModeNODE {
-		grpcClient, err = startGRPCClient(ctx, b.Config, b.SessionRegistry, errChan)
+		err = b.startGRPCClient(ctx, b.Config, b.ErrChan)
 		if err != nil {
 			return fmt.Errorf("failed to start gRPC client: %w", err)
 		}
@@ -166,31 +166,29 @@ func (b *Bootstrap) Run() error {
 			if err != nil {
 				log.Printf("failed to close gRPC client")
 			}
-		}(grpcClient)
+		}(b.GrpcClient)
 	}
 
-	go startHTTPServer(b.Config, b.SessionRegistry, errChan)
+	go startHTTPServer(b.Config, b.SessionRegistry, b.ErrChan)
 
 	if b.Config.TLSEnabled() {
-		go startHTTPSServer(b.Config, b.SessionRegistry, errChan)
+		go startHTTPSServer(b.Config, b.SessionRegistry, b.ErrChan)
 	}
 
 	go func() {
-		if err = startSSHServer(b.Randomizer, b.Config, sshConfig, b.SessionRegistry, grpcClient, b.Port, b.Config.SSHPort()); err != nil {
-			errChan <- fmt.Errorf("SSH server error: %w", err)
-		}
+		startSSHServer(b.Randomizer, b.Config, sshConfig, b.SessionRegistry, b.GrpcClient, b.Port, b.ErrChan)
 	}()
 
 	if b.Config.PprofEnabled() {
-		go startPprof(b.Config.PprofPort())
+		go startPprof(b.Config.PprofPort(), b.ErrChan)
 	}
 
 	log.Println("All services started successfully")
 
 	select {
-	case err = <-errChan:
+	case err = <-b.ErrChan:
 		return fmt.Errorf("service error: %w", err)
-	case sig := <-shutdownChan:
+	case sig := <-b.SignalChan:
 		log.Printf("Received signal %s, initiating graceful shutdown", sig)
 		cancel()
 		return nil

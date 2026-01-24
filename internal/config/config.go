@@ -13,6 +13,7 @@ type Config interface {
 
 	TLSEnabled() bool
 	TLSRedirect() bool
+	TLSStoragePath() string
 
 	ACMEEmail() string
 	CFAPIToken() string
@@ -52,6 +53,7 @@ func (c *config) HTTPSPort() string         { return c.httpsPort }
 func (c *config) KeyLoc() string            { return c.keyLoc }
 func (c *config) TLSEnabled() bool          { return c.tlsEnabled }
 func (c *config) TLSRedirect() bool         { return c.tlsRedirect }
+func (c *config) TLSStoragePath() string    { return c.tlsStoragePath }
 func (c *config) ACMEEmail() string         { return c.acmeEmail }
 func (c *config) CFAPIToken() string        { return c.cfAPIToken }
 func (c *config) ACMEStaging() bool         { return c.acmeStaging }

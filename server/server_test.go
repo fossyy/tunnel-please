@@ -27,29 +27,30 @@ func (m *mockRandom) String(length int) (string, error) {
 	return args.String(0), args.Error(1)
 }
 
-type mockConfig struct {
+type MockConfig struct {
 	mock.Mock
 }
 
-func (m *mockConfig) Domain() string            { return m.Called().String(0) }
-func (m *mockConfig) SSHPort() string           { return m.Called().String(0) }
-func (m *mockConfig) HTTPPort() string          { return m.Called().String(0) }
-func (m *mockConfig) HTTPSPort() string         { return m.Called().String(0) }
-func (m *mockConfig) TLSEnabled() bool          { return m.Called().Bool(0) }
-func (m *mockConfig) TLSRedirect() bool         { return m.Called().Bool(0) }
-func (m *mockConfig) ACMEEmail() string         { return m.Called().String(0) }
-func (m *mockConfig) CFAPIToken() string        { return m.Called().String(0) }
-func (m *mockConfig) ACMEStaging() bool         { return m.Called().Bool(0) }
-func (m *mockConfig) AllowedPortsStart() uint16 { return uint16(m.Called().Int(0)) }
-func (m *mockConfig) AllowedPortsEnd() uint16   { return uint16(m.Called().Int(0)) }
-func (m *mockConfig) BufferSize() int           { return m.Called().Int(0) }
-func (m *mockConfig) PprofEnabled() bool        { return m.Called().Bool(0) }
-func (m *mockConfig) PprofPort() string         { return m.Called().String(0) }
-func (m *mockConfig) Mode() types.ServerMode    { return m.Called().Get(0).(types.ServerMode) }
-func (m *mockConfig) GRPCAddress() string       { return m.Called().String(0) }
-func (m *mockConfig) GRPCPort() string          { return m.Called().String(0) }
-func (m *mockConfig) NodeToken() string         { return m.Called().String(0) }
-func (m *mockConfig) KeyLoc() string            { return m.Called().String(0) }
+func (m *MockConfig) Domain() string            { return m.Called().String(0) }
+func (m *MockConfig) SSHPort() string           { return m.Called().String(0) }
+func (m *MockConfig) HTTPPort() string          { return m.Called().String(0) }
+func (m *MockConfig) HTTPSPort() string         { return m.Called().String(0) }
+func (m *MockConfig) TLSEnabled() bool          { return m.Called().Bool(0) }
+func (m *MockConfig) TLSRedirect() bool         { return m.Called().Bool(0) }
+func (m *MockConfig) TLSStoragePath() string    { return m.Called().String(0) }
+func (m *MockConfig) ACMEEmail() string         { return m.Called().String(0) }
+func (m *MockConfig) CFAPIToken() string        { return m.Called().String(0) }
+func (m *MockConfig) ACMEStaging() bool         { return m.Called().Bool(0) }
+func (m *MockConfig) AllowedPortsStart() uint16 { return uint16(m.Called().Int(0)) }
+func (m *MockConfig) AllowedPortsEnd() uint16   { return uint16(m.Called().Int(0)) }
+func (m *MockConfig) BufferSize() int           { return m.Called().Int(0) }
+func (m *MockConfig) PprofEnabled() bool        { return m.Called().Bool(0) }
+func (m *MockConfig) PprofPort() string         { return m.Called().String(0) }
+func (m *MockConfig) Mode() types.ServerMode    { return m.Called().Get(0).(types.ServerMode) }
+func (m *MockConfig) GRPCAddress() string       { return m.Called().String(0) }
+func (m *MockConfig) GRPCPort() string          { return m.Called().String(0) }
+func (m *MockConfig) NodeToken() string         { return m.Called().String(0) }
+func (m *MockConfig) KeyLoc() string            { return m.Called().String(0) }
 
 type mockRegistry struct {
 	mock.Mock
@@ -169,7 +170,7 @@ func getTestSSHConfig() (*ssh.ServerConfig, ssh.Signer) {
 
 func TestNew(t *testing.T) {
 	mr := new(mockRandom)
-	mc := new(mockConfig)
+	mc := new(MockConfig)
 	mreg := new(mockRegistry)
 	mg := new(mockGrpcClient)
 	mp := new(mockPort)
@@ -222,7 +223,7 @@ func TestNew(t *testing.T) {
 
 func TestClose(t *testing.T) {
 	mr := new(mockRandom)
-	mc := new(mockConfig)
+	mc := new(MockConfig)
 	mreg := new(mockRegistry)
 	mg := new(mockGrpcClient)
 	mp := new(mockPort)
@@ -238,7 +239,7 @@ func TestClose(t *testing.T) {
 
 func TestStart(t *testing.T) {
 	mr := new(mockRandom)
-	mc := new(mockConfig)
+	mc := new(MockConfig)
 	mreg := new(mockRegistry)
 	mg := new(mockGrpcClient)
 	mp := new(mockPort)

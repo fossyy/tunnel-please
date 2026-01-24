@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 	"tunnel_pls/internal/bootstrap"
+	"tunnel_pls/internal/config"
+	"tunnel_pls/internal/port"
 	"tunnel_pls/internal/version"
 )
 
@@ -18,7 +20,12 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Printf("Starting %s", version.GetVersion())
 
-	boot, err := bootstrap.New()
+	conf, err := config.MustLoad()
+	if err != nil {
+		log.Fatalf("Config load error: %v", err)
+	}
+
+	boot, err := bootstrap.New(conf, port.New())
 	if err != nil {
 		log.Fatalf("Startup error: %v", err)
 	}

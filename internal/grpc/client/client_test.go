@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/registry"
 	"tunnel_pls/session/interaction"
 	"tunnel_pls/session/lifecycle"
@@ -16,6 +15,7 @@ import (
 	"tunnel_pls/types"
 
 	proto "git.fossy.my.id/bagas/tunnel-please-grpc/gen"
+	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -382,7 +382,8 @@ func TestProcessEventStream(t *testing.T) {
 				mockReg.getFunc = func(key registry.Key) (registry.Session, error) { return nil, errors.New("fail") }
 				mockReg.getWithUserFunc = func(user string, key registry.Key) (registry.Session, error) { return nil, errors.New("fail") }
 				c.sessionRegistry = mockReg
-				c.config = &mockConfig{domain: "test.com"}
+				c.config = &MockConfig{}
+				c.config.(*MockConfig).On("Domain").Return("test.com")
 				mockStream.sendFunc = func(n *proto.Node) error { return nil }
 
 				err := c.processEventStream(mockStream)
@@ -541,7 +542,8 @@ func TestHandleSlugChange(t *testing.T) {
 func TestHandleGetSessions(t *testing.T) {
 	mockReg := &mockRegistry{}
 	mockStream := &mockSubscribeClient{}
-	mockCfg := &mockConfig{domain: "test.com"}
+	mockCfg := &MockConfig{}
+	mockCfg.On("Domain").Return("test.com")
 	c := &client{sessionRegistry: mockReg, config: mockCfg}
 
 	evt := &proto.Events{
@@ -840,8 +842,11 @@ func TestNew_Error(t *testing.T) {
 		return nil, errors.New("dial fail")
 	}
 	defer func() { grpcNewClient = old }()
+	mockConfig := &MockConfig{}
 
-	cli, err := New(&mockConfig{}, "localhost:1234", &mockRegistry{})
+	mockConfig.On("GRPCAddress").Return("localhost")
+	mockConfig.On("GRPCPort").Return("1234")
+	cli, err := New(mockConfig, &mockRegistry{})
 	if err == nil || err.Error() != "failed to connect to gRPC server at localhost:1234: dial fail" {
 		t.Errorf("expected dial fail error, got %v", err)
 	}
@@ -851,10 +856,11 @@ func TestNew_Error(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
-	mockCfg := &mockConfig{}
+	mockConfig := &MockConfig{}
 	mockReg := &mockRegistry{}
-
-	cli, err := New(mockCfg, "localhost:1234", mockReg)
+	mockConfig.On("GRPCAddress").Return("localhost")
+	mockConfig.On("GRPCPort").Return("1234")
+	cli, err := New(mockConfig, mockReg)
 	if err != nil {
 		t.Errorf("New() error = %v", err)
 	}
@@ -864,12 +870,30 @@ func TestNew(t *testing.T) {
 	defer cli.Close()
 }
 
-type mockConfig struct {
-	config.Config
-	domain string
+type MockConfig struct {
+	mock.Mock
 }
 
-func (m *mockConfig) Domain() string { return m.domain }
+func (m *MockConfig) Domain() string            { return m.Called().String(0) }
+func (m *MockConfig) SSHPort() string           { return m.Called().String(0) }
+func (m *MockConfig) HTTPPort() string          { return m.Called().String(0) }
+func (m *MockConfig) HTTPSPort() string         { return m.Called().String(0) }
+func (m *MockConfig) TLSEnabled() bool          { return m.Called().Bool(0) }
+func (m *MockConfig) TLSRedirect() bool         { return m.Called().Bool(0) }
+func (m *MockConfig) TLSStoragePath() string    { return m.Called().String(0) }
+func (m *MockConfig) ACMEEmail() string         { return m.Called().String(0) }
+func (m *MockConfig) CFAPIToken() string        { return m.Called().String(0) }
+func (m *MockConfig) ACMEStaging() bool         { return m.Called().Bool(0) }
+func (m *MockConfig) AllowedPortsStart() uint16 { return uint16(m.Called().Int(0)) }
+func (m *MockConfig) AllowedPortsEnd() uint16   { return uint16(m.Called().Int(0)) }
+func (m *MockConfig) BufferSize() int           { return m.Called().Int(0) }
+func (m *MockConfig) PprofEnabled() bool        { return m.Called().Bool(0) }
+func (m *MockConfig) PprofPort() string         { return m.Called().String(0) }
+func (m *MockConfig) Mode() types.ServerMode    { return m.Called().Get(0).(types.ServerMode) }
+func (m *MockConfig) GRPCAddress() string       { return m.Called().String(0) }
+func (m *MockConfig) GRPCPort() string          { return m.Called().String(0) }
+func (m *MockConfig) NodeToken() string         { return m.Called().String(0) }
+func (m *MockConfig) KeyLoc() string            { return m.Called().String(0) }
 
 type mockRegistry struct {
 	registry.Registry

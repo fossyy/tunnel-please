@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 	"tunnel_pls/internal/config"
@@ -47,15 +48,18 @@ func NewTLSConfig(config config.Config) (*tls.Config, error) {
 	var initErr error
 
 	tlsManagerOnce.Do(func() {
-		certPath := "certs/tls/cert.pem"
-		keyPath := "certs/tls/privkey.pem"
-		storagePath := "certs/tls/certmagic"
+		storagePath := config.TLSStoragePath()
+		cleanBase := filepath.Clean(storagePath)
+
+		certPath := filepath.Join(cleanBase, "cert.pem")
+		keyPath := filepath.Join(cleanBase, "privkey.pem")
+		storagePathCertMagic := filepath.Join(cleanBase, "certmagic")
 
 		tm := &tlsManager{
 			config:      config,
 			certPath:    certPath,
 			keyPath:     keyPath,
-			storagePath: storagePath,
+			storagePath: storagePathCertMagic,
 		}
 
 		if tm.userCertsExistAndValid() {

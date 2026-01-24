@@ -44,7 +44,9 @@ var (
 	initialBackoff        = time.Second
 )
 
-func New(config config.Config, address string, sessionRegistry registry.Registry) (Client, error) {
+func New(config config.Config, sessionRegistry registry.Registry) (Client, error) {
+	address := fmt.Sprintf("%s:%s", config.GRPCAddress(), config.GRPCPort())
+
 	var opts []grpc.DialOption
 
 	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))

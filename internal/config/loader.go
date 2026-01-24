@@ -20,12 +20,12 @@ type config struct {
 
 	keyLoc string
 
-	tlsEnabled  bool
-	tlsRedirect bool
-
-	acmeEmail   string
-	cfAPIToken  string
-	acmeStaging bool
+	tlsEnabled     bool
+	tlsRedirect    bool
+	tlsStoragePath string
+	acmeEmail      string
+	cfAPIToken     string
+	acmeStaging    bool
 
 	allowedPortsStart uint16
 	allowedPortsEnd   uint16
