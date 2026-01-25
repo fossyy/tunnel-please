@@ -176,15 +176,6 @@ type MockForwarder struct {
 	mock.Mock
 }
 
-func (m *MockForwarder) CreateForwardedTCPIPPayload(origin net.Addr) []byte {
-	args := m.Called(origin)
-	return args.Get(0).([]byte)
-}
-
-func (m *MockForwarder) WriteBadGatewayResponse(dst io.Writer) {
-	m.Called(dst)
-}
-
 func (m *MockForwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel) {
 	m.Called(dst, src)
 }
@@ -221,8 +212,8 @@ func (m *MockForwarder) Listener() net.Listener {
 	return args.Get(0).(net.Listener)
 }
 
-func (m *MockForwarder) OpenForwardedChannel(ctx context.Context, payload []byte) (ssh.Channel, <-chan *ssh.Request, error) {
-	args := m.Called(ctx, payload)
+func (m *MockForwarder) OpenForwardedChannel(ctx context.Context, origin net.Addr) (ssh.Channel, <-chan *ssh.Request, error) {
+	args := m.Called(ctx, origin)
 	if args.Get(0) == nil {
 		return nil, args.Get(1).(<-chan *ssh.Request), args.Error(2)
 	}
@@ -413,7 +404,7 @@ func TestHandler(t *testing.T) {
 				mockSession.On("Forwarder").Return(mockForwarder)
 
 				mockForwarder.On("CreateForwardedTCPIPPayload", mock.Anything).Return([]byte("payload"))
-				mockForwarder.On("OpenForwardedChannel", mock.Anything, []byte("payload")).Return((ssh.Channel)(nil), (<-chan *ssh.Request)(nil), fmt.Errorf("open channel failed"))
+				mockForwarder.On("OpenForwardedChannel", mock.Anything, mock.Anything).Return((ssh.Channel)(nil), (<-chan *ssh.Request)(nil), fmt.Errorf("open channel failed"))
 			},
 		},
 		{
@@ -437,7 +428,7 @@ func TestHandler(t *testing.T) {
 				mockForwarder.On("CreateForwardedTCPIPPayload", mock.Anything).Return([]byte("payload"))
 
 				reqCh := make(chan *ssh.Request)
-				mockForwarder.On("OpenForwardedChannel", mock.Anything, []byte("payload")).Return(mockSSHChannel, (<-chan *ssh.Request)(reqCh), nil)
+				mockForwarder.On("OpenForwardedChannel", mock.Anything, mock.Anything).Return(mockSSHChannel, (<-chan *ssh.Request)(reqCh), nil)
 
 				mockSSHChannel.On("Write", mock.Anything).Return(0, fmt.Errorf("write error"))
 				mockSSHChannel.On("Close").Return(nil)
@@ -469,7 +460,7 @@ func TestHandler(t *testing.T) {
 				mockForwarder.On("CreateForwardedTCPIPPayload", mock.Anything).Return([]byte("payload"))
 
 				reqCh := make(chan *ssh.Request)
-				mockForwarder.On("OpenForwardedChannel", mock.Anything, []byte("payload")).Return(mockSSHChannel, (<-chan *ssh.Request)(reqCh), nil)
+				mockForwarder.On("OpenForwardedChannel", mock.Anything, mock.Anything).Return(mockSSHChannel, (<-chan *ssh.Request)(reqCh), nil)
 
 				mockSSHChannel.On("Write", mock.Anything).Return(0, nil)
 				mockSSHChannel.On("Close").Return(nil)
@@ -577,7 +568,7 @@ func TestHandler(t *testing.T) {
 				mockForwarder.On("CreateForwardedTCPIPPayload", mock.Anything).Return([]byte("payload"))
 
 				reqCh := make(chan *ssh.Request)
-				mockForwarder.On("OpenForwardedChannel", mock.Anything, []byte("payload")).Return(mockSSHChannel, (<-chan *ssh.Request)(reqCh), nil)
+				mockForwarder.On("OpenForwardedChannel", mock.Anything, mock.Anything).Return(mockSSHChannel, (<-chan *ssh.Request)(reqCh), nil)
 
 				mockSSHChannel.On("Write", mock.Anything).Return(0, nil)
 				mockSSHChannel.On("Close").Return(nil)
@@ -640,7 +631,7 @@ func TestHandler(t *testing.T) {
 
 				mockForwarder.On("CreateForwardedTCPIPPayload", mock.Anything).Return([]byte("payload"))
 				reqCh := make(chan *ssh.Request)
-				mockForwarder.On("OpenForwardedChannel", mock.Anything, []byte("payload")).Return(mockSSHChannel, (<-chan *ssh.Request)(reqCh), nil)
+				mockForwarder.On("OpenForwardedChannel", mock.Anything, mock.Anything).Return(mockSSHChannel, (<-chan *ssh.Request)(reqCh), nil)
 
 				mockSSHChannel.On("Write", mock.Anything).Return(0, nil)
 				mockSSHChannel.On("Close").Return(fmt.Errorf("close error"))
@@ -666,7 +657,7 @@ func TestHandler(t *testing.T) {
 
 				mockForwarder.On("CreateForwardedTCPIPPayload", mock.Anything).Return([]byte("payload"))
 
-				mockForwarder.On("OpenForwardedChannel", mock.Anything, []byte("payload")).Run(func(args mock.Arguments) {
+				mockForwarder.On("OpenForwardedChannel", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 					ctx := args.Get(0).(context.Context)
 					<-ctx.Done()
 				}).Return((ssh.Channel)(nil), (<-chan *ssh.Request)(nil), context.DeadlineExceeded)

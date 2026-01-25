@@ -29,10 +29,6 @@ func (m *MockForwarder) CreateForwardedTCPIPPayload(origin net.Addr) []byte {
 	return args.Get(0).([]byte)
 }
 
-func (m *MockForwarder) WriteBadGatewayResponse(dst io.Writer) {
-	m.Called(dst)
-}
-
 func (m *MockForwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel) {
 	m.Called(dst, src)
 }

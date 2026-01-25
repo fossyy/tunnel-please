@@ -72,10 +72,8 @@ func TestTCPServer_Serve_Success(t *testing.T) {
 	assert.NoError(t, err)
 	port := listener.Addr().(*net.TCPAddr).Port
 
-	payload := []byte("test-payload")
-	mf.On("CreateForwardedTCPIPPayload", mock.Anything).Return(payload)
 	reqs := make(chan *ssh.Request)
-	mf.On("OpenForwardedChannel", mock.Anything, payload).Return(new(MockSSHChannel), (<-chan *ssh.Request)(reqs), nil)
+	mf.On("OpenForwardedChannel", mock.Anything, mock.Anything).Return(new(MockSSHChannel), (<-chan *ssh.Request)(reqs), nil)
 	mf.On("HandleConnection", mock.Anything, mock.Anything).Return()
 
 	go func() {
@@ -99,12 +97,9 @@ func TestTCPServer_handleTcp_Success(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer clientConn.Close()
 
-	payload := []byte("test-payload")
-	mf.On("CreateForwardedTCPIPPayload", mock.Anything).Return(payload)
-
 	reqs := make(chan *ssh.Request)
 	mockChannel := new(MockSSHChannel)
-	mf.On("OpenForwardedChannel", mock.Anything, payload).Return(mockChannel, (<-chan *ssh.Request)(reqs), nil)
+	mf.On("OpenForwardedChannel", mock.Anything, mock.Anything).Return(mockChannel, (<-chan *ssh.Request)(reqs), nil)
 
 	mf.On("HandleConnection", serverConn, mockChannel).Return()
 
@@ -121,9 +116,7 @@ func TestTCPServer_handleTcp_CloseError(t *testing.T) {
 	mc.On("Close").Return(errors.New("close error"))
 	mc.On("RemoteAddr").Return(&net.TCPAddr{})
 
-	payload := []byte("test-payload")
-	mf.On("CreateForwardedTCPIPPayload", mock.Anything).Return(payload)
-	mf.On("OpenForwardedChannel", mock.Anything, payload).Return(nil, (<-chan *ssh.Request)(nil), errors.New("open error"))
+	mf.On("OpenForwardedChannel", mock.Anything, mock.Anything).Return(nil, (<-chan *ssh.Request)(nil), errors.New("open error"))
 
 	srv.handleTcp(mc)
 	mc.AssertExpectations(t)
@@ -136,9 +129,7 @@ func TestTCPServer_handleTcp_OpenChannelError(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	defer clientConn.Close()
 
-	payload := []byte("test-payload")
-	mf.On("CreateForwardedTCPIPPayload", mock.Anything).Return(payload)
-	mf.On("OpenForwardedChannel", mock.Anything, payload).Return(nil, (<-chan *ssh.Request)(nil), errors.New("open error"))
+	mf.On("OpenForwardedChannel", mock.Anything, mock.Anything).Return(nil, (<-chan *ssh.Request)(nil), errors.New("open error"))
 
 	srv.handleTcp(serverConn)
 

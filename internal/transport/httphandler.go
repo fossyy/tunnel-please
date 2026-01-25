@@ -152,10 +152,9 @@ func (hh *httpHandler) handlePingRequest(slug string, conn net.Conn) bool {
 }
 
 func (hh *httpHandler) forwardRequest(hw stream.HTTP, initialRequest header.RequestHeader, sshSession registry.Session) {
-	payload := sshSession.Forwarder().CreateForwardedTCPIPPayload(hw.RemoteAddr())
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	channel, reqs, err := sshSession.Forwarder().OpenForwardedChannel(ctx, payload)
+	channel, reqs, err := sshSession.Forwarder().OpenForwardedChannel(ctx, hw.RemoteAddr())
 	if err != nil {
 		log.Printf("Failed to open forwarded-tcpip channel: %v", err)
 		return

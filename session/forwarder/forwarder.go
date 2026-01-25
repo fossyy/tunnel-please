@@ -24,9 +24,7 @@ type Forwarder interface {
 	TunnelType() types.TunnelType
 	ForwardedPort() uint16
 	HandleConnection(dst io.ReadWriter, src ssh.Channel)
-	CreateForwardedTCPIPPayload(origin net.Addr) []byte
-	OpenForwardedChannel(ctx context.Context, payload []byte) (ssh.Channel, <-chan *ssh.Request, error)
-	WriteBadGatewayResponse(dst io.Writer)
+	OpenForwardedChannel(ctx context.Context, origin net.Addr) (ssh.Channel, <-chan *ssh.Request, error)
 	Close() error
 }
 type forwarder struct {
@@ -60,7 +58,8 @@ func (f *forwarder) copyWithBuffer(dst io.Writer, src io.Reader) (written int64,
 	return io.CopyBuffer(dst, src, buf)
 }
 
-func (f *forwarder) OpenForwardedChannel(ctx context.Context, payload []byte) (ssh.Channel, <-chan *ssh.Request, error) {
+func (f *forwarder) OpenForwardedChannel(ctx context.Context, origin net.Addr) (ssh.Channel, <-chan *ssh.Request, error) {
+	payload := createForwardedTCPIPPayload(origin, f.forwardedPort)
 	type channelResult struct {
 		channel ssh.Channel
 		reqs    <-chan *ssh.Request
@@ -171,14 +170,6 @@ func (f *forwarder) Listener() net.Listener {
 	return f.listener
 }
 
-func (f *forwarder) WriteBadGatewayResponse(dst io.Writer) {
-	_, err := dst.Write(types.BadGatewayResponse)
-	if err != nil {
-		log.Printf("failed to write Bad Gateway response: %v", err)
-		return
-	}
-}
-
 func (f *forwarder) Close() error {
 	if f.Listener() != nil {
 		return f.listener.Close()
@@ -186,7 +177,7 @@ func (f *forwarder) Close() error {
 	return nil
 }
 
-func (f *forwarder) CreateForwardedTCPIPPayload(origin net.Addr) []byte {
+func createForwardedTCPIPPayload(origin net.Addr, destPort uint16) []byte {
 	host, portStr, _ := net.SplitHostPort(origin.String())
 	port, _ := strconv.Atoi(portStr)
 
@@ -197,7 +188,7 @@ func (f *forwarder) CreateForwardedTCPIPPayload(origin net.Addr) []byte {
 		OriginPort uint32
 	}{
 		DestAddr:   "localhost",
-		DestPort:   uint32(f.ForwardedPort()),
+		DestPort:   uint32(destPort),
 		OriginAddr: host,
 		OriginPort: uint32(port),
 	}
