@@ -1,6 +1,7 @@
 package forwarder
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -8,7 +9,6 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"time"
 	"tunnel_pls/internal/config"
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
@@ -25,7 +25,7 @@ type Forwarder interface {
 	ForwardedPort() uint16
 	HandleConnection(dst io.ReadWriter, src ssh.Channel)
 	CreateForwardedTCPIPPayload(origin net.Addr) []byte
-	OpenForwardedChannel(payload []byte) (ssh.Channel, <-chan *ssh.Request, error)
+	OpenForwardedChannel(ctx context.Context, payload []byte) (ssh.Channel, <-chan *ssh.Request, error)
 	WriteBadGatewayResponse(dst io.Writer)
 	Close() error
 }
@@ -60,7 +60,7 @@ func (f *forwarder) copyWithBuffer(dst io.Writer, src io.Reader) (written int64,
 	return io.CopyBuffer(dst, src, buf)
 }
 
-func (f *forwarder) OpenForwardedChannel(payload []byte) (ssh.Channel, <-chan *ssh.Request, error) {
+func (f *forwarder) OpenForwardedChannel(ctx context.Context, payload []byte) (ssh.Channel, <-chan *ssh.Request, error) {
 	type channelResult struct {
 		channel ssh.Channel
 		reqs    <-chan *ssh.Request
@@ -72,7 +72,7 @@ func (f *forwarder) OpenForwardedChannel(payload []byte) (ssh.Channel, <-chan *s
 		channel, reqs, err := f.conn.OpenChannel("forwarded-tcpip", payload)
 		select {
 		case resultChan <- channelResult{channel, reqs, err}:
-		default:
+		case <-ctx.Done():
 			if channel != nil {
 				err = channel.Close()
 				if err != nil {
@@ -87,8 +87,8 @@ func (f *forwarder) OpenForwardedChannel(payload []byte) (ssh.Channel, <-chan *s
 	select {
 	case result := <-resultChan:
 		return result.channel, result.reqs, result.err
-	case <-time.After(5 * time.Second):
-		return nil, nil, errors.New("timeout opening forwarded-tcpip channel")
+	case <-ctx.Done():
+		return nil, nil, fmt.Errorf("context cancelled: %w", ctx.Err())
 	}
 }
 
