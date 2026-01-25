@@ -57,7 +57,6 @@ func (tt *tcp) handleTcp(conn net.Conn) {
 	channel, reqs, err := tt.forwarder.OpenForwardedChannel(payload)
 	if err != nil {
 		log.Printf("Failed to open forwarded-tcpip channel: %v", err)
-
 		return
 	}
 

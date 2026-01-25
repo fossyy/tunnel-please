@@ -1,8 +1,6 @@
 package forwarder
 
 import (
-	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -189,42 +187,20 @@ func (f *forwarder) Close() error {
 }
 
 func (f *forwarder) CreateForwardedTCPIPPayload(origin net.Addr) []byte {
-	var buf bytes.Buffer
-
-	host, originPort := parseAddr(origin.String())
-
-	writeSSHString(&buf, "localhost")
-	err := binary.Write(&buf, binary.BigEndian, uint32(f.ForwardedPort()))
-	if err != nil {
-		log.Printf("Failed to write string to buffer: %v", err)
-		return nil
-	}
-
-	writeSSHString(&buf, host)
-	err = binary.Write(&buf, binary.BigEndian, uint32(originPort))
-	if err != nil {
-		log.Printf("Failed to write string to buffer: %v", err)
-		return nil
-	}
-
-	return buf.Bytes()
-}
-
-func parseAddr(addr string) (string, uint16) {
-	host, portStr, err := net.SplitHostPort(addr)
-	if err != nil {
-		log.Printf("Failed to parse origin address: %s from address %s", err.Error(), addr)
-		return "0.0.0.0", uint16(0)
-	}
+	host, portStr, _ := net.SplitHostPort(origin.String())
 	port, _ := strconv.Atoi(portStr)
-	return host, uint16(port)
-}
 
-func writeSSHString(buffer *bytes.Buffer, str string) {
-	err := binary.Write(buffer, binary.BigEndian, uint32(len(str)))
-	if err != nil {
-		log.Printf("Failed to write string to buffer: %v", err)
-		return
+	forwardPayload := struct {
+		DestAddr   string
+		DestPort   uint32
+		OriginAddr string
+		OriginPort uint32
+	}{
+		DestAddr:   "localhost",
+		DestPort:   uint32(f.ForwardedPort()),
+		OriginAddr: host,
+		OriginPort: uint32(port),
 	}
-	buffer.WriteString(str)
+
+	return ssh.Marshal(forwardPayload)
 }
