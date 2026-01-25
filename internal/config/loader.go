@@ -31,7 +31,8 @@ type config struct {
 	allowedPortsEnd   uint16
 
 	bufferSize int
-
+	headerSize int
+	
 	pprofEnabled bool
 	pprofPort    string
 
@@ -73,6 +74,7 @@ func parse() (*config, error) {
 	}
 
 	bufferSize := parseBufferSize()
+	headerSize := parseHeaderSize()
 
 	pprofEnabled := getenvBool("PPROF_ENABLED", false)
 	pprofPort := getenv("PPROF_PORT", "6060")
@@ -100,6 +102,7 @@ func parse() (*config, error) {
 		allowedPortsStart: start,
 		allowedPortsEnd:   end,
 		bufferSize:        bufferSize,
+		headerSize:        headerSize,
 		pprofEnabled:      pprofEnabled,
 		pprofPort:         pprofPort,
 		mode:              mode,
@@ -155,6 +158,16 @@ func parseBufferSize() int {
 	raw := getenv("BUFFER_SIZE", "32768")
 	size, err := strconv.Atoi(raw)
 	if err != nil || size < 4096 || size > 1048576 {
+		log.Println("Invalid BUFFER_SIZE, falling back to 4096")
+		return 4096
+	}
+	return size
+}
+
+func parseHeaderSize() int {
+	raw := getenv("MAX_HEADER_SIZE", "4096")
+	size, err := strconv.Atoi(raw)
+	if err != nil || size < 4096 || size > 131072 {
 		log.Println("Invalid BUFFER_SIZE, falling back to 4096")
 		return 4096
 	}

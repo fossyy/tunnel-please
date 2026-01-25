@@ -188,6 +188,32 @@ func TestParseBufferSize(t *testing.T) {
 	}
 }
 
+func TestParseHeaderSize(t *testing.T) {
+	tests := []struct {
+		name   string
+		val    string
+		expect int
+	}{
+		{"valid size", "8192", 8192},
+		{"default size", "", 4096},
+		{"too small", "1024", 4096},
+		{"too large", "2000000", 4096},
+		{"invalid format", "abc", 4096},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.val != "" {
+				t.Setenv("MAX_HEADER_SIZE", tt.val)
+			} else {
+				os.Unsetenv("MAX_HEADER_SIZE")
+			}
+			size := parseHeaderSize()
+			assert.Equal(t, tt.expect, size)
+		})
+	}
+}
+
 func TestParse(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -271,6 +297,7 @@ func TestGetters(t *testing.T) {
 		"PORT":             "2222",
 		"HTTP_PORT":        "80",
 		"HTTPS_PORT":       "443",
+		"KEY_LOC":          "certs/ssh/id_rsa",
 		"TLS_ENABLED":      "true",
 		"TLS_REDIRECT":     "true",
 		"TLS_STORAGE_PATH": "certs/tls/",
@@ -279,6 +306,7 @@ func TestGetters(t *testing.T) {
 		"ACME_STAGING":     "true",
 		"ALLOWED_PORTS":    "1000-2000",
 		"BUFFER_SIZE":      "16384",
+		"MAX_HEADER_SIZE":  "4096",
 		"PPROF_ENABLED":    "true",
 		"PPROF_PORT":       "7070",
 		"MODE":             "standalone",
@@ -299,6 +327,7 @@ func TestGetters(t *testing.T) {
 	assert.Equal(t, "2222", cfg.SSHPort())
 	assert.Equal(t, "80", cfg.HTTPPort())
 	assert.Equal(t, "443", cfg.HTTPSPort())
+	assert.Equal(t, "certs/ssh/id_rsa", cfg.KeyLoc())
 	assert.Equal(t, true, cfg.TLSEnabled())
 	assert.Equal(t, true, cfg.TLSRedirect())
 	assert.Equal(t, "certs/tls/", cfg.TLSStoragePath())
@@ -308,6 +337,7 @@ func TestGetters(t *testing.T) {
 	assert.Equal(t, uint16(1000), cfg.AllowedPortsStart())
 	assert.Equal(t, uint16(2000), cfg.AllowedPortsEnd())
 	assert.Equal(t, 16384, cfg.BufferSize())
+	assert.Equal(t, 4096, cfg.HeaderSize())
 	assert.Equal(t, true, cfg.PprofEnabled())
 	assert.Equal(t, "7070", cfg.PprofPort())
 	assert.Equal(t, types.ServerMode(types.ServerModeSTANDALONE), cfg.Mode())
