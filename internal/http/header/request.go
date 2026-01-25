@@ -1,19 +1,33 @@
 package header
 
 import (
-	"bufio"
+	"bytes"
 	"fmt"
 )
 
-func NewRequest(r interface{}) (RequestHeader, error) {
-	switch v := r.(type) {
-	case []byte:
-		return parseHeadersFromBytes(v)
-	case *bufio.Reader:
-		return parseHeadersFromReader(v)
-	default:
-		return nil, fmt.Errorf("unsupported type: %T", r)
+func NewRequest(headerData []byte) (RequestHeader, error) {
+	header := &requestHeader{
+		headers: make(map[string]string, 16),
 	}
+
+	lineEnd := bytes.Index(headerData, []byte("\r\n"))
+	if lineEnd == -1 {
+		return nil, fmt.Errorf("invalid request: no CRLF found in start line")
+	}
+
+	startLine := headerData[:lineEnd]
+	header.startLine = startLine
+	var err error
+	header.method, header.path, header.version, err = parseStartLine(startLine)
+	if err != nil {
+		return nil, err
+	}
+
+	remaining := headerData[lineEnd+2:]
+
+	setRemainingHeaders(remaining, header)
+
+	return header, nil
 }
 
 func (req *requestHeader) Value(key string) string {

@@ -1,7 +1,6 @@
 package header
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 )
@@ -36,31 +35,6 @@ func setRemainingHeaders(remaining []byte, header interface {
 	}
 }
 
-func parseHeadersFromBytes(headerData []byte) (RequestHeader, error) {
-	header := &requestHeader{
-		headers: make(map[string]string, 16),
-	}
-
-	lineEnd := bytes.Index(headerData, []byte("\r\n"))
-	if lineEnd == -1 {
-		return nil, fmt.Errorf("invalid request: no CRLF found in start line")
-	}
-
-	startLine := headerData[:lineEnd]
-	header.startLine = startLine
-	var err error
-	header.method, header.path, header.version, err = parseStartLine(startLine)
-	if err != nil {
-		return nil, err
-	}
-
-	remaining := headerData[lineEnd+2:]
-
-	setRemainingHeaders(remaining, header)
-
-	return header, nil
-}
-
 func parseStartLine(startLine []byte) (method, path, version string, err error) {
 	firstSpace := bytes.IndexByte(startLine, ' ')
 	if firstSpace == -1 {
@@ -78,51 +52,6 @@ func parseStartLine(startLine []byte) (method, path, version string, err error) 
 	version = string(startLine[secondSpace+1:])
 
 	return method, path, version, nil
-}
-
-func parseHeadersFromReader(br *bufio.Reader) (RequestHeader, error) {
-	header := &requestHeader{
-		headers: make(map[string]string, 16),
-	}
-
-	startLineBytes, err := br.ReadSlice('\n')
-	if err != nil {
-		return nil, err
-	}
-
-	startLineBytes = bytes.TrimRight(startLineBytes, "\r\n")
-	header.startLine = make([]byte, len(startLineBytes))
-	copy(header.startLine, startLineBytes)
-
-	header.method, header.path, header.version, err = parseStartLine(header.startLine)
-	if err != nil {
-		return nil, err
-	}
-
-	for {
-		lineBytes, err := br.ReadSlice('\n')
-		if err != nil {
-			return nil, err
-		}
-
-		lineBytes = bytes.TrimRight(lineBytes, "\r\n")
-
-		if len(lineBytes) == 0 {
-			break
-		}
-
-		colonIdx := bytes.IndexByte(lineBytes, ':')
-		if colonIdx == -1 {
-			continue
-		}
-
-		key := bytes.TrimSpace(lineBytes[:colonIdx])
-		value := bytes.TrimSpace(lineBytes[colonIdx+1:])
-
-		header.headers[string(key)] = string(value)
-	}
-
-	return header, nil
 }
 
 func finalize(startLine []byte, headers map[string]string) []byte {

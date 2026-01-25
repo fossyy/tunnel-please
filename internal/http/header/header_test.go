@@ -1,15 +1,13 @@
 package header
 
 import (
-	"bufio"
 	"bytes"
-	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNewRequestFromBytes(t *testing.T) {
+func TestNewRequest(t *testing.T) {
 	tests := []struct {
 		name          string
 		data          []byte
@@ -91,94 +89,6 @@ func TestNewRequestFromBytes(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestNewRequestFromReader(t *testing.T) {
-	tests := []struct {
-		name          string
-		data          []byte
-		expectErr     bool
-		errContains   string
-		expectEOF     bool
-		expectMethod  string
-		expectPath    string
-		expectVersion string
-		expectHeaders map[string]string
-	}{
-		{
-			name:          "success",
-			data:          []byte("POST /api HTTP/1.1\r\nContent-Type: application/json\r\n\r\n"),
-			expectErr:     false,
-			expectMethod:  "POST",
-			expectPath:    "/api",
-			expectVersion: "HTTP/1.1",
-			expectHeaders: map[string]string{
-				"Content-Type": "application/json",
-			},
-		},
-		{
-			name:      "read error on start line",
-			data:      []byte{},
-			expectErr: true,
-			expectEOF: true,
-		},
-		{
-			name:        "invalid start line",
-			data:        []byte("INVALID\n\n"),
-			expectErr:   true,
-			errContains: "invalid start line",
-		},
-		{
-			name:      "read error on headers",
-			data:      []byte("GET / HTTP/1.1\nHost: example.com"),
-			expectErr: true,
-			expectEOF: true,
-		},
-		{
-			name:          "multiple colons in header",
-			data:          []byte("GET / HTTP/1.1\r\nX-Custom: value:with:colons\r\n\r\n"),
-			expectErr:     false,
-			expectMethod:  "GET",
-			expectPath:    "/",
-			expectVersion: "HTTP/1.1",
-			expectHeaders: map[string]string{
-				"X-Custom": "value:with:colons",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			br := bufio.NewReader(bytes.NewReader(tt.data))
-			req, err := NewRequest(br)
-			if tt.expectErr {
-				assert.Error(t, err)
-				if tt.expectEOF {
-					assert.Equal(t, io.EOF, err)
-				}
-				if tt.errContains != "" {
-					assert.Contains(t, err.Error(), tt.errContains)
-				}
-				assert.Nil(t, req)
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, req)
-				assert.Equal(t, tt.expectMethod, req.Method())
-				assert.Equal(t, tt.expectPath, req.Path())
-				assert.Equal(t, tt.expectVersion, req.Version())
-				for k, v := range tt.expectHeaders {
-					assert.Equal(t, v, req.Value(k))
-				}
-			}
-		})
-	}
-}
-
-func TestNewRequestUnsupportedType(t *testing.T) {
-	req, err := NewRequest(123)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported type: int")
-	assert.Nil(t, req)
 }
 
 func TestRequestHeaderMethods(t *testing.T) {
@@ -311,33 +221,6 @@ func TestSetRemainingHeaders(t *testing.T) {
 			assert.Equal(t, len(tt.expectHeaders), len(req.headers))
 			for k, v := range tt.expectHeaders {
 				assert.Equal(t, v, req.headers[k])
-			}
-		})
-	}
-}
-
-func TestParseHeadersFromReaderEdgeCases(t *testing.T) {
-	tests := []struct {
-		name          string
-		data          []byte
-		expectHeaders map[string]string
-	}{
-		{
-			name: "malformed header line",
-			data: []byte("GET / HTTP/1.1\r\nMalformedLine\r\nK1: V1\r\n\r\n"),
-			expectHeaders: map[string]string{
-				"K1": "V1",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			br := bufio.NewReader(bytes.NewReader(tt.data))
-			req, err := parseHeadersFromReader(br)
-			assert.NoError(t, err)
-			for k, v := range tt.expectHeaders {
-				assert.Equal(t, v, req.Value(k))
 			}
 		})
 	}
