@@ -45,6 +45,7 @@ func (m *MockConfig) ACMEStaging() bool         { return m.Called().Bool(0) }
 func (m *MockConfig) AllowedPortsStart() uint16 { return uint16(m.Called().Int(0)) }
 func (m *MockConfig) AllowedPortsEnd() uint16   { return uint16(m.Called().Int(0)) }
 func (m *MockConfig) BufferSize() int           { return m.Called().Int(0) }
+func (m *MockConfig) HeaderSize() int           { return m.Called().Int(0) }
 func (m *MockConfig) PprofEnabled() bool        { return m.Called().Bool(0) }
 func (m *MockConfig) PprofPort() string         { return m.Called().String(0) }
 func (m *MockConfig) Mode() types.ServerMode {

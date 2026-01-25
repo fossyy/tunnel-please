@@ -230,9 +230,28 @@ func (m *MockForwarder) OpenForwardedChannel(ctx context.Context, payload []byte
 }
 
 type MockConn struct {
-	net.Conn
 	mock.Mock
 	ReadBuffer *bytes.Buffer
+}
+
+func (m *MockConn) LocalAddr() net.Addr {
+	args := m.Called()
+	return args.Get(0).(net.Addr)
+}
+
+func (m *MockConn) SetDeadline(t time.Time) error {
+	args := m.Called(t)
+	return args.Error(0)
+}
+
+func (m *MockConn) SetReadDeadline(t time.Time) error {
+	args := m.Called(t)
+	return args.Error(0)
+}
+
+func (m *MockConn) SetWriteDeadline(t time.Time) error {
+	args := m.Called(t)
+	return args.Error(0)
 }
 
 func (m *MockConn) Read(b []byte) (n int, err error) {
@@ -245,6 +264,9 @@ func (m *MockConn) Read(b []byte) (n int, err error) {
 
 func (m *MockConn) Write(b []byte) (n int, err error) {
 	args := m.Called(b)
+	if args.Int(0) == -1 {
+		return len(b), args.Error(1)
+	}
 	return args.Int(0), args.Error(1)
 }
 
@@ -269,11 +291,12 @@ func (c *wrappedConn) RemoteAddr() net.Addr {
 
 func TestNewHTTPHandler(t *testing.T) {
 	msr := new(MockSessionRegistry)
-	hh := newHTTPHandler("domain", msr, true)
+	mockConfig := &MockConfig{}
+	mockConfig.On("Domain").Return("domain")
+	mockConfig.On("TLSRedirect").Return(false)
+	hh := newHTTPHandler(mockConfig, msr)
 	assert.NotNil(t, hh)
-	assert.Equal(t, "domain", hh.domain)
 	assert.Equal(t, msr, hh.sessionRegistry)
-	assert.True(t, hh.redirectTLS)
 }
 
 func TestHandler(t *testing.T) {
@@ -318,8 +341,8 @@ func TestHandler(t *testing.T) {
 			name:        "redirect to TLS",
 			isTLS:       false,
 			redirectTLS: true,
-			request:     []byte("GET / HTTP/1.1\r\nHost: example.domain\r\n\r\n"),
-			expected:    []byte("HTTP/1.1 301 Moved Permanently\r\nLocation: https://example.domain/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+			request:     []byte("GET / HTTP/1.1\r\nHost: tunnel.example.com\r\n\r\n"),
+			expected:    []byte("HTTP/1.1 301 Moved Permanently\r\nLocation: https://tunnel.example.com/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
 			setupMocks: func(msr *MockSessionRegistry) {
 			},
 		},
@@ -350,7 +373,25 @@ func TestHandler(t *testing.T) {
 			isTLS:       false,
 			redirectTLS: false,
 			request:     []byte("INVALID\r\n\r\n"),
-			expected:    []byte(""),
+			expected:    []byte("HTTP/1.1 400 Bad Request\r\n\r\n"),
+			setupMocks: func(msr *MockSessionRegistry) {
+			},
+		},
+		{
+			name:        "bad request - header too large",
+			isTLS:       false,
+			redirectTLS: false,
+			request:     []byte(fmt.Sprintf("GET / HTTP/1.1\r\nHost: test.domain\r\n%s\r\n\r\n", strings.Repeat("test", 10000))),
+			expected:    []byte("HTTP/1.1 400 Bad Request\r\n\r\n"),
+			setupMocks: func(msr *MockSessionRegistry) {
+			},
+		},
+		{
+			name:        "bad request - no request",
+			isTLS:       false,
+			redirectTLS: false,
+			request:     []byte(""),
+			expected:    []byte("HTTP/1.1 400 Bad Request\r\n\r\n"),
 			setupMocks: func(msr *MockSessionRegistry) {
 			},
 		},
@@ -453,7 +494,8 @@ func TestHandler(t *testing.T) {
 			setupConn: func() (net.Conn, net.Conn) {
 				mc := new(MockConn)
 				mc.ReadBuffer = bytes.NewBuffer([]byte("GET / HTTP/1.1\r\nHost: example.domain\r\n\r\n"))
-				mc.On("Write", mock.Anything).Return(0, fmt.Errorf("write error"))
+				mc.On("SetReadDeadline", mock.Anything).Return(nil)
+				mc.On("Write", mock.Anything).Return(-1, fmt.Errorf("write error"))
 				mc.On("Close").Return(nil)
 				return mc, nil
 			},
@@ -467,7 +509,23 @@ func TestHandler(t *testing.T) {
 			setupConn: func() (net.Conn, net.Conn) {
 				mc := new(MockConn)
 				mc.ReadBuffer = bytes.NewBuffer([]byte("GET / HTTP/1.1\r\n\r\n"))
+				mc.On("SetReadDeadline", mock.Anything).Return(nil)
 				mc.On("Write", mock.Anything).Return(0, fmt.Errorf("write error"))
+				mc.On("Close").Return(nil)
+				return mc, nil
+			},
+		},
+		{
+			name:        "read error - connection failure",
+			isTLS:       false,
+			redirectTLS: false,
+			request:     []byte(""),
+			expected:    []byte(""),
+			setupConn: func() (net.Conn, net.Conn) {
+				mc := new(MockConn)
+				mc.On("SetReadDeadline", mock.Anything).Return(nil)
+				mc.On("Write", mock.Anything).Return(0, fmt.Errorf("write error"))
+				mc.On("Read", mock.Anything).Return(0, fmt.Errorf("connection reset by peer"))
 				mc.On("Close").Return(nil)
 				return mc, nil
 			},
@@ -481,6 +539,7 @@ func TestHandler(t *testing.T) {
 			setupConn: func() (net.Conn, net.Conn) {
 				mc := new(MockConn)
 				mc.ReadBuffer = bytes.NewBuffer([]byte("GET / HTTP/1.1\r\nHost: ping.domain\r\n\r\n"))
+				mc.On("SetReadDeadline", mock.Anything).Return(nil)
 				mc.On("Write", mock.Anything).Return(0, fmt.Errorf("write error"))
 				mc.On("Close").Return(nil)
 				return mc, nil
@@ -495,6 +554,7 @@ func TestHandler(t *testing.T) {
 			setupConn: func() (net.Conn, net.Conn) {
 				mc := new(MockConn)
 				mc.ReadBuffer = bytes.NewBuffer([]byte("GET / HTTP/1.1\r\nHost: ping.domain\r\n\r\n"))
+				mc.On("SetReadDeadline", mock.Anything).Return(nil)
 				mc.On("Write", mock.Anything).Return(182, nil)
 				mc.On("Close").Return(fmt.Errorf("close error"))
 				return mc, nil
@@ -527,6 +587,7 @@ func TestHandler(t *testing.T) {
 			setupConn: func() (net.Conn, net.Conn) {
 				mc := new(MockConn)
 				mc.ReadBuffer = bytes.NewBuffer([]byte("GET / HTTP/1.1\r\nHost: test.domain\r\n\r\n"))
+				mc.On("SetReadDeadline", mock.Anything).Return(nil)
 				mc.On("Close").Return(fmt.Errorf("stream close error")).Times(2)
 				addr, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:12345")
 				mc.On("RemoteAddr").Return(addr)
@@ -557,6 +618,7 @@ func TestHandler(t *testing.T) {
 			setupConn: func() (net.Conn, net.Conn) {
 				mc := new(MockConn)
 				mc.ReadBuffer = bytes.NewBuffer([]byte("GET / HTTP/1.1\r\nHost: test.domain\r\n\r\n"))
+				mc.On("SetReadDeadline", mock.Anything).Return(nil)
 				mc.On("Close").Return(nil).Times(2)
 				mc.On("RemoteAddr").Return(&net.IPAddr{IP: net.ParseIP("127.0.0.1")})
 				return mc, nil
@@ -615,10 +677,15 @@ func TestHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockSessionRegistry := new(MockSessionRegistry)
+			mockConfig := &MockConfig{}
+			port := "0"
+			mockConfig.On("Domain").Return("example.com")
+			mockConfig.On("HTTPPort").Return(port)
+			mockConfig.On("HeaderSize").Return(4096)
+			mockConfig.On("TLSRedirect").Return(true)
 			hh := &httpHandler{
-				domain:          "domain",
 				sessionRegistry: mockSessionRegistry,
-				redirectTLS:     tt.redirectTLS,
+				config:          mockConfig,
 			}
 
 			if tt.setupMocks != nil {

@@ -13,31 +13,32 @@ import (
 
 func TestNewHTTPSServer(t *testing.T) {
 	msr := new(MockSessionRegistry)
-	domain := "example.com"
-	port := "443"
-	redirectTLS := false
+	mockConfig := &MockConfig{}
+	port := "0"
 	tlsConfig := &tls.Config{}
-
-	srv := NewHTTPSServer(domain, port, msr, redirectTLS, tlsConfig)
+	mockConfig.On("Domain").Return(mockConfig)
+	mockConfig.On("HTTPSPort").Return(port)
+	srv := NewHTTPSServer(mockConfig, msr, tlsConfig)
 	assert.NotNil(t, srv)
 
 	httpsSrv, ok := srv.(*https)
 	assert.True(t, ok)
-	assert.Equal(t, port, httpsSrv.port)
-	assert.Equal(t, domain, httpsSrv.domain)
 	assert.Equal(t, tlsConfig, httpsSrv.tlsConfig)
 	assert.Equal(t, msr, httpsSrv.httpHandler.sessionRegistry)
 }
 
 func TestHTTPSServer_Listen(t *testing.T) {
 	msr := new(MockSessionRegistry)
-
+	mockConfig := &MockConfig{}
+	port := "0"
+	mockConfig.On("Domain").Return(mockConfig)
+	mockConfig.On("HTTPSPort").Return(port)
 	tlsConfig := &tls.Config{
 		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			return nil, nil
 		},
 	}
-	srv := NewHTTPSServer("example.com", "0", msr, false, tlsConfig)
+	srv := NewHTTPSServer(mockConfig, msr, tlsConfig)
 
 	listener, err := srv.Listen()
 	if err != nil {
@@ -50,7 +51,11 @@ func TestHTTPSServer_Listen(t *testing.T) {
 
 func TestHTTPSServer_Serve(t *testing.T) {
 	msr := new(MockSessionRegistry)
-	srv := NewHTTPSServer("example.com", "0", msr, false, &tls.Config{})
+	mockConfig := &MockConfig{}
+	port := "0"
+	mockConfig.On("Domain").Return(mockConfig)
+	mockConfig.On("HTTPSPort").Return(port)
+	srv := NewHTTPSServer(mockConfig, msr, &tls.Config{})
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	assert.NoError(t, err)
@@ -66,7 +71,12 @@ func TestHTTPSServer_Serve(t *testing.T) {
 
 func TestHTTPSServer_Serve_AcceptError(t *testing.T) {
 	msr := new(MockSessionRegistry)
-	srv := NewHTTPSServer("example.com", "0", msr, false, &tls.Config{})
+
+	mockConfig := &MockConfig{}
+	port := "0"
+	mockConfig.On("Domain").Return(mockConfig)
+	mockConfig.On("HTTPSPort").Return(port)
+	srv := NewHTTPSServer(mockConfig, msr, &tls.Config{})
 
 	ml := new(mockListener)
 	ml.On("Accept").Return(nil, errors.New("accept error")).Once()
@@ -79,17 +89,23 @@ func TestHTTPSServer_Serve_AcceptError(t *testing.T) {
 
 func TestHTTPSServer_Serve_Success(t *testing.T) {
 	msr := new(MockSessionRegistry)
-	srv := NewHTTPSServer("example.com", "0", msr, false, &tls.Config{})
+	mockConfig := &MockConfig{}
+	port := "0"
+	mockConfig.On("Domain").Return(mockConfig)
+	mockConfig.On("HTTPSPort").Return(port)
+	mockConfig.On("HeaderSize").Return(4096)
+
+	srv := NewHTTPSServer(mockConfig, msr, &tls.Config{})
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	assert.NoError(t, err)
-	port := listener.Addr().(*net.TCPAddr).Port
+	listenerport := listener.Addr().(*net.TCPAddr).Port
 
 	go func() {
 		_ = srv.Serve(listener)
 	}()
 
-	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", listenerport))
 	assert.NoError(t, err)
 
 	_, _ = conn.Write([]byte("GET / HTTP/1.1\r\nHost: ping.example.com\r\n\r\n"))

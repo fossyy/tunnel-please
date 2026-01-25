@@ -1,7 +1,7 @@
 package transport
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/http/header"
 	"tunnel_pls/internal/http/stream"
 	"tunnel_pls/internal/middleware"
@@ -21,16 +22,14 @@ import (
 )
 
 type httpHandler struct {
-	domain          string
+	config          config.Config
 	sessionRegistry registry.Registry
-	redirectTLS     bool
 }
 
-func newHTTPHandler(domain string, sessionRegistry registry.Registry, redirectTLS bool) *httpHandler {
+func newHTTPHandler(config config.Config, sessionRegistry registry.Registry) *httpHandler {
 	return &httpHandler{
-		domain:          domain,
+		config:          config,
 		sessionRegistry: sessionRegistry,
-		redirectTLS:     redirectTLS,
 	}
 }
 
@@ -56,10 +55,25 @@ func (hh *httpHandler) badRequest(conn net.Conn) error {
 func (hh *httpHandler) Handler(conn net.Conn, isTLS bool) {
 	defer hh.closeConnection(conn)
 
-	dstReader := bufio.NewReader(conn)
-	reqhf, err := header.NewRequest(dstReader)
+	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	buf := make([]byte, hh.config.HeaderSize())
+	n, err := conn.Read(buf)
+	if err != nil {
+		_ = hh.badRequest(conn)
+		return
+	}
+
+	if idx := bytes.Index(buf[:n], []byte("\r\n\r\n")); idx == -1 {
+		_ = hh.badRequest(conn)
+		return
+	}
+
+	_ = conn.SetReadDeadline(time.Time{})
+
+	reqhf, err := header.NewRequest(buf[:n])
 	if err != nil {
 		log.Printf("Error creating request header: %v", err)
+		_ = hh.badRequest(conn)
 		return
 	}
 
@@ -70,7 +84,7 @@ func (hh *httpHandler) Handler(conn net.Conn, isTLS bool) {
 	}
 
 	if hh.shouldRedirectToTLS(isTLS) {
-		_ = hh.redirect(conn, http.StatusMovedPermanently, fmt.Sprintf("https://%s.%s/\r\n", slug, hh.domain))
+		_ = hh.redirect(conn, http.StatusMovedPermanently, fmt.Sprintf("https://%s.%s/\r\n", slug, hh.config.Domain()))
 		return
 	}
 
@@ -87,7 +101,7 @@ func (hh *httpHandler) Handler(conn net.Conn, isTLS bool) {
 		return
 	}
 
-	hw := stream.New(conn, dstReader, conn.RemoteAddr())
+	hw := stream.New(conn, conn, conn.RemoteAddr())
 	defer func(hw stream.HTTP) {
 		err = hw.Close()
 		if err != nil {
@@ -113,7 +127,7 @@ func (hh *httpHandler) extractSlug(reqhf header.RequestHeader) (string, error) {
 }
 
 func (hh *httpHandler) shouldRedirectToTLS(isTLS bool) bool {
-	return !isTLS && hh.redirectTLS
+	return !isTLS && hh.config.TLSRedirect()
 }
 
 func (hh *httpHandler) handlePingRequest(slug string, conn net.Conn) bool {

@@ -98,7 +98,7 @@ func (b *Bootstrap) startGRPCClient(ctx context.Context, conf config.Config, err
 }
 
 func startHTTPServer(conf config.Config, registry registry.Registry, errChan chan<- error) {
-	httpserver := transport.NewHTTPServer(conf.Domain(), conf.HTTPPort(), registry, conf.TLSRedirect())
+	httpserver := transport.NewHTTPServer(conf, registry)
 	ln, err := httpserver.Listen()
 	if err != nil {
 		errChan <- fmt.Errorf("failed to start http server: %w", err)
@@ -115,7 +115,7 @@ func startHTTPSServer(conf config.Config, registry registry.Registry, errChan ch
 		errChan <- fmt.Errorf("failed to create TLS config: %w", err)
 		return
 	}
-	httpsServer := transport.NewHTTPSServer(conf.Domain(), conf.HTTPSPort(), registry, conf.TLSRedirect(), tlsCfg)
+	httpsServer := transport.NewHTTPSServer(conf, registry, tlsCfg)
 	ln, err := httpsServer.Listen()
 	if err != nil {
 		errChan <- fmt.Errorf("failed to create TLS config: %w", err)

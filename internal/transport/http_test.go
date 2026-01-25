@@ -13,24 +13,27 @@ import (
 
 func TestNewHTTPServer(t *testing.T) {
 	msr := new(MockSessionRegistry)
-	domain := "example.com"
-	port := "8080"
-	redirectTLS := true
+	mockConfig := &MockConfig{}
+	port := "0"
+	mockConfig.On("Domain").Return("example.com")
+	mockConfig.On("HTTPPort").Return(port)
 
-	srv := NewHTTPServer(domain, port, msr, redirectTLS)
+	srv := NewHTTPServer(mockConfig, msr)
 	assert.NotNil(t, srv)
 
 	httpSrv, ok := srv.(*httpServer)
 	assert.True(t, ok)
-	assert.Equal(t, port, httpSrv.port)
-	assert.Equal(t, domain, httpSrv.handler.domain)
 	assert.Equal(t, msr, httpSrv.handler.sessionRegistry)
-	assert.Equal(t, redirectTLS, httpSrv.handler.redirectTLS)
+	assert.NotNil(t, srv)
 }
 
 func TestHTTPServer_Listen(t *testing.T) {
 	msr := new(MockSessionRegistry)
-	srv := NewHTTPServer("example.com", "0", msr, false)
+	mockConfig := &MockConfig{}
+	port := "0"
+	mockConfig.On("Domain").Return("example.com")
+	mockConfig.On("HTTPPort").Return(port)
+	srv := NewHTTPServer(mockConfig, msr)
 
 	listener, err := srv.Listen()
 	assert.NoError(t, err)
@@ -40,7 +43,11 @@ func TestHTTPServer_Listen(t *testing.T) {
 
 func TestHTTPServer_Serve(t *testing.T) {
 	msr := new(MockSessionRegistry)
-	srv := NewHTTPServer("example.com", "0", msr, false)
+	mockConfig := &MockConfig{}
+	port := "0"
+	mockConfig.On("Domain").Return("example.com")
+	mockConfig.On("HTTPPort").Return(port)
+	srv := NewHTTPServer(mockConfig, msr)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	assert.NoError(t, err)
@@ -56,7 +63,11 @@ func TestHTTPServer_Serve(t *testing.T) {
 
 func TestHTTPServer_Serve_AcceptError(t *testing.T) {
 	msr := new(MockSessionRegistry)
-	srv := NewHTTPServer("example.com", "0", msr, false)
+	mockConfig := &MockConfig{}
+	port := "0"
+	mockConfig.On("Domain").Return("example.com")
+	mockConfig.On("HTTPPort").Return(port)
+	srv := NewHTTPServer(mockConfig, msr)
 
 	ml := new(mockListener)
 	ml.On("Accept").Return(nil, errors.New("accept error")).Once()
@@ -69,17 +80,23 @@ func TestHTTPServer_Serve_AcceptError(t *testing.T) {
 
 func TestHTTPServer_Serve_Success(t *testing.T) {
 	msr := new(MockSessionRegistry)
-	srv := NewHTTPServer("example.com", "0", msr, false)
+	mockConfig := &MockConfig{}
+	port := "0"
+	mockConfig.On("Domain").Return("example.com")
+	mockConfig.On("HTTPPort").Return(port)
+	mockConfig.On("HeaderSize").Return(4096)
+	mockConfig.On("TLSRedirect").Return(false)
+	srv := NewHTTPServer(mockConfig, msr)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	assert.NoError(t, err)
-	port := listener.Addr().(*net.TCPAddr).Port
+	listenerport := listener.Addr().(*net.TCPAddr).Port
 
 	go func() {
 		_ = srv.Serve(listener)
 	}()
 
-	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", listenerport))
 	assert.NoError(t, err)
 
 	_, _ = conn.Write([]byte("GET / HTTP/1.1\r\nHost: ping.example.com\r\n\r\n"))
