@@ -1,7 +1,9 @@
 package registry
 
 import (
-	"errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"sync"
 	"testing"
 	"time"
@@ -15,47 +17,109 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-type mockSession struct{ user string }
+type mockSession struct {
+	mock.Mock
+}
 
-func (m *mockSession) Lifecycle() lifecycle.Lifecycle { return &mockLifecycle{user: m.user} }
+func (m *mockSession) Lifecycle() lifecycle.Lifecycle {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(lifecycle.Lifecycle)
+}
 func (m *mockSession) Interaction() interaction.Interaction {
-	return nil
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(interaction.Interaction)
 }
 func (m *mockSession) Forwarder() forwarder.Forwarder {
-	return nil
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(forwarder.Forwarder)
 }
 func (m *mockSession) Slug() slug.Slug {
-	return &mockSlug{}
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(slug.Slug)
 }
 func (m *mockSession) Detail() *types.Detail {
-	return nil
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(*types.Detail)
 }
 
-type mockLifecycle struct{ user string }
+type mockLifecycle struct {
+	mock.Mock
+}
 
 func (ml *mockLifecycle) Channel() ssh.Channel {
-	return nil
+	args := ml.Called()
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(ssh.Channel)
 }
 
-func (ml *mockLifecycle) Connection() ssh.Conn                 { return nil }
-func (ml *mockLifecycle) PortRegistry() port.Port              { return nil }
-func (ml *mockLifecycle) SetChannel(channel ssh.Channel)       { _ = channel }
-func (ml *mockLifecycle) SetStatus(status types.SessionStatus) { _ = status }
-func (ml *mockLifecycle) IsActive() bool                       { return false }
-func (ml *mockLifecycle) StartedAt() time.Time                 { return time.Time{} }
-func (ml *mockLifecycle) Close() error                         { return nil }
-func (ml *mockLifecycle) User() string                         { return ml.user }
+func (ml *mockLifecycle) Connection() ssh.Conn {
+	args := ml.Called()
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(ssh.Conn)
+}
 
-type mockSlug struct{}
+func (ml *mockLifecycle) PortRegistry() port.Port {
+	args := ml.Called()
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(port.Port)
+}
 
-func (ms *mockSlug) Set(slug string) { _ = slug }
-func (ms *mockSlug) String() string  { return "" }
+func (ml *mockLifecycle) SetChannel(channel ssh.Channel)       { ml.Called(channel) }
+func (ml *mockLifecycle) SetStatus(status types.SessionStatus) { ml.Called(status) }
+func (ml *mockLifecycle) IsActive() bool                       { return ml.Called().Bool(0) }
+func (ml *mockLifecycle) StartedAt() time.Time                 { return ml.Called().Get(0).(time.Time) }
+func (ml *mockLifecycle) Close() error                         { return ml.Called().Error(0) }
+func (ml *mockLifecycle) User() string                         { return ml.Called().String(0) }
+
+type mockSlug struct {
+	mock.Mock
+}
+
+func (ms *mockSlug) Set(slug string) { ms.Called(slug) }
+func (ms *mockSlug) String() string  { return ms.Called().String(0) }
+
+func createMockSession(user ...string) *mockSession {
+	u := "user1"
+	if len(user) > 0 {
+		u = user[0]
+	}
+	m := new(mockSession)
+	ml := new(mockLifecycle)
+	ml.On("User").Return(u).Maybe()
+	m.On("Lifecycle").Return(ml).Maybe()
+	ms := new(mockSlug)
+	ms.On("Set", mock.Anything).Maybe()
+	m.On("Slug").Return(ms).Maybe()
+	m.On("Interaction").Return(nil).Maybe()
+	m.On("Forwarder").Return(nil).Maybe()
+	m.On("Detail").Return(nil).Maybe()
+	return m
+}
 
 func TestNewRegistry(t *testing.T) {
 	r := NewRegistry()
-	if r == nil {
-		t.Fatal("NewRegistry returned nil")
-	}
+	require.NotNil(t, r)
 }
 
 func TestRegistry_Get(t *testing.T) {
@@ -71,7 +135,7 @@ func TestRegistry_Get(t *testing.T) {
 			setupFunc: func(r *registry) {
 				user := "user1"
 				key := types.SessionKey{Id: "test1", Type: types.TunnelTypeHTTP}
-				session := &mockSession{user: user}
+				session := createMockSession(user)
 
 				r.mu.Lock()
 				defer r.mu.Unlock()
@@ -113,13 +177,8 @@ func TestRegistry_Get(t *testing.T) {
 
 			session, err := r.Get(tt.key)
 
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("expected error %v, got %v", tt.wantErr, err)
-			}
-
-			if (session != nil) != tt.wantResult {
-				t.Fatalf("expected session existence to be %v, got %v", tt.wantResult, session != nil)
-			}
+			assert.ErrorIs(t, err, tt.wantErr)
+			assert.Equal(t, tt.wantResult, session != nil)
 		})
 	}
 }
@@ -138,7 +197,7 @@ func TestRegistry_GetWithUser(t *testing.T) {
 			setupFunc: func(r *registry) {
 				user := "user1"
 				key := types.SessionKey{Id: "test1", Type: types.TunnelTypeHTTP}
-				session := &mockSession{user: user}
+				session := createMockSession()
 
 				r.mu.Lock()
 				defer r.mu.Unlock()
@@ -183,13 +242,8 @@ func TestRegistry_GetWithUser(t *testing.T) {
 
 			session, err := r.GetWithUser(tt.user, tt.key)
 
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("expected error %v, got %v", tt.wantErr, err)
-			}
-
-			if (session != nil) != tt.wantResult {
-				t.Fatalf("expected session existence to be %v, got %v", tt.wantResult, session != nil)
-			}
+			assert.ErrorIs(t, err, tt.wantErr)
+			assert.Equal(t, tt.wantResult, session != nil)
 		})
 	}
 }
@@ -207,7 +261,7 @@ func TestRegistry_Update(t *testing.T) {
 			setupFunc: func(r *registry) (types.SessionKey, types.SessionKey) {
 				oldKey := types.SessionKey{Id: "test1", Type: types.TunnelTypeHTTP}
 				newKey := types.SessionKey{Id: "test2", Type: types.TunnelTypeHTTP}
-				session := &mockSession{user: "user1"}
+				session := createMockSession("user1")
 
 				r.mu.Lock()
 				defer r.mu.Unlock()
@@ -226,7 +280,7 @@ func TestRegistry_Update(t *testing.T) {
 			setupFunc: func(r *registry) (types.SessionKey, types.SessionKey) {
 				oldKey := types.SessionKey{Id: "test1", Type: types.TunnelTypeHTTP}
 				newKey := types.SessionKey{Id: "test2", Type: types.TunnelTypeHTTP}
-				session := &mockSession{user: "user1"}
+				session := createMockSession()
 
 				r.mu.Lock()
 				defer r.mu.Unlock()
@@ -247,7 +301,7 @@ func TestRegistry_Update(t *testing.T) {
 			setupFunc: func(r *registry) (types.SessionKey, types.SessionKey) {
 				oldKey := types.SessionKey{Id: "test1", Type: types.TunnelTypeHTTP}
 				newKey := types.SessionKey{Id: "ping", Type: types.TunnelTypeHTTP}
-				session := &mockSession{user: "user1"}
+				session := createMockSession()
 
 				r.mu.Lock()
 				defer r.mu.Unlock()
@@ -266,7 +320,7 @@ func TestRegistry_Update(t *testing.T) {
 			setupFunc: func(r *registry) (types.SessionKey, types.SessionKey) {
 				oldKey := types.SessionKey{Id: "test1", Type: types.TunnelTypeHTTP}
 				newKey := types.SessionKey{Id: "test2-", Type: types.TunnelTypeHTTP}
-				session := &mockSession{user: "user1"}
+				session := createMockSession()
 
 				r.mu.Lock()
 				defer r.mu.Unlock()
@@ -285,7 +339,7 @@ func TestRegistry_Update(t *testing.T) {
 			setupFunc: func(r *registry) (types.SessionKey, types.SessionKey) {
 				oldKey := types.SessionKey{Id: "test2", Type: types.TunnelTypeHTTP}
 				newKey := types.SessionKey{Id: "test4", Type: types.TunnelTypeHTTP}
-				session := &mockSession{user: "user1"}
+				session := createMockSession()
 
 				r.mu.Lock()
 				defer r.mu.Unlock()
@@ -304,7 +358,7 @@ func TestRegistry_Update(t *testing.T) {
 			setupFunc: func(r *registry) (types.SessionKey, types.SessionKey) {
 				oldKey := types.SessionKey{Id: "test2", Type: types.TunnelTypeHTTP}
 				newKey := types.SessionKey{Id: "test4", Type: types.TunnelTypeHTTP}
-				session := &mockSession{user: "user1"}
+				session := createMockSession()
 
 				r.mu.Lock()
 				defer r.mu.Unlock()
@@ -323,7 +377,7 @@ func TestRegistry_Update(t *testing.T) {
 			setupFunc: func(r *registry) (types.SessionKey, types.SessionKey) {
 				oldKey := types.SessionKey{Id: "test1", Type: types.TunnelTypeHTTP}
 				newKey := types.SessionKey{Id: "test2", Type: types.TunnelTypeTCP}
-				session := &mockSession{user: "user1"}
+				session := createMockSession()
 
 				r.mu.Lock()
 				defer r.mu.Unlock()
@@ -342,7 +396,7 @@ func TestRegistry_Update(t *testing.T) {
 			setupFunc: func(r *registry) (types.SessionKey, types.SessionKey) {
 				oldKey := types.SessionKey{Id: "test2", Type: types.TunnelTypeTCP}
 				newKey := oldKey
-				session := &mockSession{user: "user1"}
+				session := createMockSession()
 
 				r.mu.Lock()
 				defer r.mu.Unlock()
@@ -371,19 +425,15 @@ func TestRegistry_Update(t *testing.T) {
 			oldKey, newKey := tt.setupFunc(r)
 
 			err := r.Update(tt.user, oldKey, newKey)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("expected error %v, got %v", tt.wantErr, err)
-			}
+			assert.ErrorIs(t, err, tt.wantErr)
 
 			if err == nil {
 				r.mu.RLock()
 				defer r.mu.RUnlock()
-				if _, ok := r.byUser[tt.user][newKey]; !ok {
-					t.Errorf("newKey not found in registry")
-				}
-				if _, ok := r.byUser[tt.user][oldKey]; ok {
-					t.Errorf("oldKey still exists in registry")
-				}
+				_, ok := r.byUser[tt.user][newKey]
+				assert.True(t, ok, "newKey not found in registry")
+				_, ok = r.byUser[tt.user][oldKey]
+				assert.False(t, ok, "oldKey still exists in registry")
 			}
 		})
 	}
@@ -410,7 +460,7 @@ func TestRegistry_Register(t *testing.T) {
 			user: "user1",
 			setupFunc: func(r *registry) Key {
 				key := types.SessionKey{Id: "test1", Type: types.TunnelTypeHTTP}
-				session := &mockSession{user: "user1"}
+				session := createMockSession()
 
 				r.mu.Lock()
 				r.byUser["user1"] = map[Key]Session{key: session}
@@ -426,7 +476,7 @@ func TestRegistry_Register(t *testing.T) {
 			user: "user1",
 			setupFunc: func(r *registry) Key {
 				firstKey := types.SessionKey{Id: "first", Type: types.TunnelTypeHTTP}
-				session := &mockSession{user: "user1"}
+				session := createMockSession()
 				r.mu.Lock()
 				r.byUser["user1"] = map[Key]Session{firstKey: session}
 				r.slugIndex[firstKey] = "user1"
@@ -450,22 +500,16 @@ func TestRegistry_Register(t *testing.T) {
 			}
 
 			key := tt.setupFunc(r)
-			session := &mockSession{user: tt.user}
+			session := createMockSession()
 
 			ok := r.Register(key, session)
-			if ok != tt.wantOK {
-				t.Fatalf("expected success %v, got %v", tt.wantOK, ok)
-			}
+			assert.Equal(t, tt.wantOK, ok)
 
 			if ok {
 				r.mu.RLock()
 				defer r.mu.RUnlock()
-				if r.byUser[tt.user][key] != session {
-					t.Errorf("session not stored in byUser")
-				}
-				if r.slugIndex[key] != tt.user {
-					t.Errorf("slugIndex not updated")
-				}
+				assert.Equal(t, session, r.byUser[tt.user][key], "session not stored in byUser")
+				assert.Equal(t, tt.user, r.slugIndex[key], "slugIndex not updated")
 			}
 		})
 	}
@@ -492,8 +536,8 @@ func TestRegistry_GetAllSessionFromUser(t *testing.T) {
 				key2 := types.SessionKey{Id: "b", Type: types.TunnelTypeTCP}
 				r.mu.Lock()
 				r.byUser[user] = map[Key]Session{
-					key1: &mockSession{user: user},
-					key2: &mockSession{user: user},
+					key1: createMockSession(),
+					key2: createMockSession(),
 				}
 				r.mu.Unlock()
 				return user
@@ -511,9 +555,7 @@ func TestRegistry_GetAllSessionFromUser(t *testing.T) {
 			}
 			user := tt.setupFunc(r)
 			sessions := r.GetAllSessionFromUser(user)
-			if len(sessions) != tt.expectN {
-				t.Errorf("expected %d sessions, got %d", tt.expectN, len(sessions))
-			}
+			assert.Len(t, sessions, tt.expectN)
 		})
 	}
 }
@@ -530,7 +572,7 @@ func TestRegistry_Remove(t *testing.T) {
 			setupFunc: func(r *registry) (string, types.SessionKey) {
 				user := "user1"
 				key := types.SessionKey{Id: "a", Type: types.TunnelTypeHTTP}
-				session := &mockSession{user: user}
+				session := createMockSession()
 				r.mu.Lock()
 				r.byUser[user] = map[Key]Session{key: session}
 				r.slugIndex[key] = user
@@ -538,15 +580,12 @@ func TestRegistry_Remove(t *testing.T) {
 				return user, key
 			},
 			verify: func(t *testing.T, r *registry, user string, key types.SessionKey) {
-				if _, ok := r.byUser[user][key]; ok {
-					t.Errorf("expected key to be removed from byUser")
-				}
-				if _, ok := r.slugIndex[key]; ok {
-					t.Errorf("expected key to be removed from slugIndex")
-				}
-				if _, ok := r.byUser[user]; ok {
-					t.Errorf("expected user to be removed from byUser map")
-				}
+				_, ok := r.byUser[user][key]
+				assert.False(t, ok, "expected key to be removed from byUser")
+				_, ok = r.slugIndex[key]
+				assert.False(t, ok, "expected key to be removed from slugIndex")
+				_, ok = r.byUser[user]
+				assert.False(t, ok, "expected user to be removed from byUser map")
 			},
 		},
 		{

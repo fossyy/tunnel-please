@@ -1,76 +1,69 @@
 package middleware
 
 import (
-	"errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"testing"
 )
 
 type mockResponseHeader struct {
-	headers map[string]string
+	mock.Mock
 }
 
 func (m *mockResponseHeader) Value(key string) string {
-	return m.headers[key]
+	return m.Called(key).String(0)
 }
 
 func (m *mockResponseHeader) Set(key string, value string) {
-	m.headers[key] = value
+	m.Called(key, value)
 }
 
 func (m *mockResponseHeader) Remove(key string) {
-	delete(m.headers, key)
+	m.Called(key)
 }
 
 func (m *mockResponseHeader) Finalize() []byte {
-	return nil
+	return m.Called().Get(0).([]byte)
 }
 
 func TestTunnelFingerprintHandleResponse(t *testing.T) {
 	tests := []struct {
-		name         string
-		initialState map[string]string
-		expected     map[string]string
-		body         []byte
-		wantErr      error
+		name     string
+		expected map[string]string
+		body     []byte
+		wantErr  error
 	}{
 		{
-			name:         "Sets Server Header",
-			initialState: map[string]string{},
-			expected:     map[string]string{"Server": "Tunnel Please"},
-			body:         []byte("Sample body"),
-			wantErr:      nil,
+			name:     "Sets Server Header",
+			expected: map[string]string{"Server": "Tunnel Please"},
+			body:     []byte("Sample body"),
+			wantErr:  nil,
 		},
 		{
-			name:         "Overwrites Server Header",
-			initialState: map[string]string{"Server": "Old Value"},
-			expected:     map[string]string{"Server": "Tunnel Please"},
-			body:         nil,
-			wantErr:      nil,
+			name:     "Overwrites Server Header",
+			expected: map[string]string{"Server": "Tunnel Please"},
+			body:     nil,
+			wantErr:  nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockHeader := &mockResponseHeader{headers: tt.initialState}
+			mockHeader := new(mockResponseHeader)
+			for k, v := range tt.expected {
+				mockHeader.On("Set", k, v).Return()
+			}
+
 			tunnelFingerprint := NewTunnelFingerprint()
 
 			err := tunnelFingerprint.HandleResponse(mockHeader, tt.body)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("unexpected error, got: %v, want: %v", err, tt.wantErr)
-			}
-
-			for key, expectedValue := range tt.expected {
-				if val := mockHeader.Value(key); val != expectedValue {
-					t.Errorf("header[%q] = %q; want %q", key, val, expectedValue)
-				}
-			}
+			assert.ErrorIs(t, err, tt.wantErr)
+			mockHeader.AssertExpectations(t)
 		})
 	}
 }
 
 func TestNewTunnelFingerprint(t *testing.T) {
 	instance := NewTunnelFingerprint()
-	if instance == nil {
-		t.Errorf("NewTunnelFingerprint() = nil; want non-nil instance")
-	}
+	assert.NotNil(t, instance)
 }

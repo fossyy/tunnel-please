@@ -144,19 +144,6 @@ func (m *MockLifecycle) Close() error {
 	return args.Error(0)
 }
 
-type MockSSHConn struct {
-	ssh.Conn
-	mock.Mock
-}
-
-func (m *MockSSHConn) OpenChannel(name string, data []byte) (ssh.Channel, <-chan *ssh.Request, error) {
-	args := m.Called(name, data)
-	if args.Get(0) == nil {
-		return nil, args.Get(1).(<-chan *ssh.Request), args.Error(2)
-	}
-	return args.Get(0).(ssh.Channel), args.Get(1).(<-chan *ssh.Request), args.Error(2)
-}
-
 type MockSSHChannel struct {
 	ssh.Channel
 	mock.Mock

@@ -1,40 +1,42 @@
 package middleware
 
 import (
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"net"
 	"testing"
 )
 
 type mockRequestHeader struct {
-	headers map[string]string
+	mock.Mock
 }
 
 func (m *mockRequestHeader) Value(key string) string {
-	return m.headers[key]
+	return m.Called(key).String(0)
 }
 
 func (m *mockRequestHeader) Set(key string, value string) {
-	m.headers[key] = value
+	m.Called(key, value)
 }
 
 func (m *mockRequestHeader) Remove(key string) {
-	delete(m.headers, key)
+	m.Called(key)
 }
 
 func (m *mockRequestHeader) Finalize() []byte {
-	return []byte{}
+	return m.Called().Get(0).([]byte)
 }
 
 func (m *mockRequestHeader) Method() string {
-	return ""
+	return m.Called().String(0)
 }
 
 func (m *mockRequestHeader) Path() string {
-	return ""
+	return m.Called().String(0)
 }
 
 func (m *mockRequestHeader) Version() string {
-	return ""
+	return m.Called().String(0)
 }
 
 func TestForwardedFor_HandleRequest(t *testing.T) {
@@ -73,23 +75,19 @@ func TestForwardedFor_HandleRequest(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ff := NewForwardedFor(tc.addr)
-			reqHeader := &mockRequestHeader{headers: make(map[string]string)}
+			reqHeader := new(mockRequestHeader)
+
+			if !tc.expectError {
+				reqHeader.On("Set", "X-Forwarded-For", tc.expectedHost).Return()
+			}
 
 			err := ff.HandleRequest(reqHeader)
 
 			if tc.expectError {
-				if err == nil {
-					t.Fatalf("expected error but got none")
-				}
+				assert.Error(t, err)
 			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-
-				host := reqHeader.Value("X-Forwarded-For")
-				if host != tc.expectedHost {
-					t.Errorf("expected X-Forwarded-For header to be '%s', got '%s'", tc.expectedHost, host)
-				}
+				assert.NoError(t, err)
+				reqHeader.AssertExpectations(t)
 			}
 		})
 	}
@@ -121,10 +119,7 @@ func TestNewForwardedFor(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ff := NewForwardedFor(tc.addr)
-
-			if ff.addr.String() != tc.expectAddr.String() {
-				t.Errorf("expected addr to be '%v', got '%v'", tc.expectAddr, ff.addr)
-			}
+			assert.Equal(t, tc.expectAddr.String(), ff.addr.String())
 		})
 	}
 }

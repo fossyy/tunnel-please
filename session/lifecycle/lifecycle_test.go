@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -65,10 +66,10 @@ func (m *MockForwarder) Listener() net.Listener {
 	return args.Get(0).(net.Listener)
 }
 
-func (m *MockForwarder) OpenForwardedChannel(payload []byte) (ssh.Channel, <-chan *ssh.Request, error) {
-	args := m.Called(payload)
+func (m *MockForwarder) OpenForwardedChannel(ctx context.Context, origin net.Addr) (ssh.Channel, <-chan *ssh.Request, error) {
+	args := m.Called(ctx, origin)
 	if args.Get(0) == nil {
-		return nil, args.Get(1).(<-chan *ssh.Request), args.Error(2)
+		return nil, nil, args.Error(2)
 	}
 	return args.Get(0).(ssh.Channel), args.Get(1).(<-chan *ssh.Request), args.Error(2)
 }
@@ -208,7 +209,8 @@ func TestLifecycle_SetStatus(t *testing.T) {
 
 	mockLifecycle := New(mockSSHConn, mockForwarder, mockSlug, mockPort, mockSessionRegistry, "mas-fuad")
 
-	assert.NotNil(t, mockLifecycle.StartedAt())
+	mockLifecycle.SetStatus(types.SessionStatusRUNNING)
+	assert.True(t, mockLifecycle.IsActive())
 }
 
 func TestLifecycle_IsActive(t *testing.T) {

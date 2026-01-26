@@ -1,19 +1,11 @@
 package random
 
 import (
-	"errors"
-	"fmt"
 	"io"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
-
-type brainrotReader struct {
-	err error
-}
-
-func (f *brainrotReader) Read(p []byte) (int, error) {
-	return 0, f.err
-}
 
 func TestRandom_String(t *testing.T) {
 	tests := []struct {
@@ -32,20 +24,18 @@ func TestRandom_String(t *testing.T) {
 			randomizer := New()
 
 			result, err := randomizer.String(tt.length)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("String() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if !tt.wantErr && len(result) != tt.length {
-				t.Errorf("String() length = %v, want %v", len(result), tt.length)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Len(t, result, tt.length)
 			}
 		})
 	}
 }
 
 func TestRandomWithFailingReader_String(t *testing.T) {
-	errBrainrot := fmt.Errorf("you are not sigma enough")
+	errBrainrot := assert.AnError
 
 	tests := []struct {
 		name      string
@@ -53,8 +43,10 @@ func TestRandomWithFailingReader_String(t *testing.T) {
 		expectErr error
 	}{
 		{
-			name:      "failing reader",
-			reader:    &brainrotReader{err: errBrainrot},
+			name: "failing reader",
+			reader: func() io.Reader {
+				return &failingReader{err: errBrainrot}
+			}(),
 			expectErr: errBrainrot,
 		},
 	}
@@ -63,14 +55,16 @@ func TestRandomWithFailingReader_String(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			randomizer := &random{reader: tt.reader}
 			result, err := randomizer.String(20)
-			if !errors.Is(err, tt.expectErr) {
-				t.Errorf("String() error = %v, wantErr %v", err, tt.expectErr)
-				return
-			}
-
-			if result != "" {
-				t.Errorf("String() result = %v, want an empty string due to error", result)
-			}
+			assert.ErrorIs(t, err, tt.expectErr)
+			assert.Empty(t, result)
 		})
 	}
+}
+
+type failingReader struct {
+	err error
+}
+
+func (f *failingReader) Read(p []byte) (int, error) {
+	return 0, f.err
 }

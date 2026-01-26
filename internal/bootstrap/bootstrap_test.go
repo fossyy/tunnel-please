@@ -198,8 +198,8 @@ func (m *MockGRPCClient) ClientConn() *grpc.ClientConn {
 }
 
 func (m *MockGRPCClient) AuthorizeConn(ctx context.Context, token string) (authorized bool, user string, err error) {
-	m.Called()
-	return
+	args := m.Called(ctx, token)
+	return args.Bool(0), args.String(1), args.Error(2)
 }
 
 func (m *MockGRPCClient) CheckServerHealth(ctx context.Context) error {

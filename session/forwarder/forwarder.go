@@ -73,11 +73,7 @@ func (f *forwarder) OpenForwardedChannel(ctx context.Context, origin net.Addr) (
 		case resultChan <- channelResult{channel, reqs, err}:
 		case <-ctx.Done():
 			if channel != nil {
-				err = channel.Close()
-				if err != nil {
-					log.Printf("Failed to close unused channel: %v", err)
-					return
-				}
+				_ = channel.Close()
 				go ssh.DiscardRequests(reqs)
 			}
 		}
@@ -116,10 +112,7 @@ func (f *forwarder) copyAndClose(dst io.Writer, src io.Reader, direction string)
 
 func (f *forwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel) {
 	defer func() {
-		_, err := io.Copy(io.Discard, src)
-		if err != nil {
-			log.Printf("Failed to discard connection: %v", err)
-		}
+		_, _ = io.Copy(io.Discard, src)
 	}()
 
 	var wg sync.WaitGroup

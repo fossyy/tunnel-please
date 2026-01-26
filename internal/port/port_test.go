@@ -1,6 +1,7 @@
 package port
 
 import (
+	"github.com/stretchr/testify/assert"
 	"testing"
 )
 
@@ -20,8 +21,10 @@ func TestAddRange(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			pm := New()
 			err := pm.AddRange(tt.startPort, tt.endPort)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("AddRange() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
 			}
 		})
 	}
@@ -48,9 +51,8 @@ func TestUnassigned(t *testing.T) {
 				_ = pm.SetStatus(k, v)
 			}
 			got, gotOk := pm.Unassigned()
-			if got != tt.want || gotOk != tt.wantOk {
-				t.Errorf("Unassigned() got = %v, want %v, gotOk = %v, wantOk %v", got, tt.want, gotOk, tt.wantOk)
-			}
+			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.wantOk, gotOk)
 		})
 	}
 }
@@ -70,12 +72,12 @@ func TestSetStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := pm.SetStatus(tt.port, tt.assigned); err != nil {
-				t.Errorf("SetStatus() error = %v", err)
-			}
-			if status, _ := pm.(*port).ports[tt.port]; status != tt.assigned {
-				t.Errorf("SetStatus() failed, port %v has status %v, want %v", tt.port, status, tt.assigned)
-			}
+			err := pm.SetStatus(tt.port, tt.assigned)
+			assert.NoError(t, err)
+
+			status, ok := pm.(*port).ports[tt.port]
+			assert.True(t, ok)
+			assert.Equal(t, tt.assigned, status)
 		})
 	}
 }
@@ -102,13 +104,10 @@ func TestClaim(t *testing.T) {
 			}
 
 			got := pm.Claim(tt.port)
-			if got != tt.want {
-				t.Errorf("Claim() got = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, tt.want, got)
 
-			if finalState := pm.(*port).ports[tt.port]; finalState != true {
-				t.Errorf("Claim() did not update port %v status to 'assigned'", tt.port)
-			}
+			finalState := pm.(*port).ports[tt.port]
+			assert.True(t, finalState)
 		})
 	}
 }
