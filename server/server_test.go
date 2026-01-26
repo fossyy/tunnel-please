@@ -181,14 +181,6 @@ func (m *MockListener) Addr() net.Addr {
 	return m.Called().Get(0).(net.Addr)
 }
 
-type MockSession struct {
-	mock.Mock
-}
-
-func (m *MockSession) Start() error {
-	return m.Called().Error(0)
-}
-
 func getTestSSHConfig() (*ssh.ServerConfig, ssh.Signer) {
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	signer, _ := ssh.NewSignerFromKey(key)
@@ -244,7 +236,10 @@ func TestNew(t *testing.T) {
 			t.Fatal(err)
 		}
 		port := l.Addr().(*net.TCPAddr).Port
-		defer l.Close()
+		defer func(l net.Listener) {
+			err = l.Close()
+			assert.NoError(t, err)
+		}(l)
 
 		s, err := New(mr, mc, sc, mreg, mg, mp, fmt.Sprintf("%d", port))
 		assert.Error(t, err)
@@ -360,7 +355,9 @@ func TestStart(t *testing.T) {
 		go s.Start()
 
 		time.Sleep(50 * time.Millisecond)
-		clientConn.Close()
+		err := clientConn.Close()
+		assert.NoError(t, err)
+
 		time.Sleep(100 * time.Millisecond)
 
 		mockListener.AssertExpectations(t)
@@ -394,7 +391,9 @@ func TestStart(t *testing.T) {
 		go s.Start()
 
 		time.Sleep(50 * time.Millisecond)
-		clientConn.Close()
+		err := clientConn.Close()
+		assert.NoError(t, err)
+
 		time.Sleep(100 * time.Millisecond)
 
 		mockListener.AssertExpectations(t)
@@ -423,7 +422,9 @@ func TestHandleConnection(t *testing.T) {
 			portRegistry:    mockPort,
 		}
 
-		clientConn.Close()
+		err := clientConn.Close()
+		assert.NoError(t, err)
+
 		s.handleConnection(serverConn)
 	})
 
@@ -489,7 +490,10 @@ func TestHandleConnection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer listener.Close()
+		defer func(listener net.Listener) {
+			err = listener.Close()
+			assert.NoError(t, err)
+		}(listener)
 
 		serverAddr := listener.Addr().String()
 
@@ -529,7 +533,10 @@ func TestHandleConnection(t *testing.T) {
 				t.Logf("Client dial failed: %v", err)
 				return
 			}
-			defer client.Close()
+			defer func(client *ssh.Client) {
+				err = client.Close()
+				assert.NoError(t, err)
+			}(client)
 
 			type forwardPayload struct {
 				BindAddr string
@@ -578,7 +585,10 @@ func TestHandleConnection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer listener.Close()
+		defer func(listener net.Listener) {
+			err = listener.Close()
+			assert.NoError(t, err)
+		}(listener)
 
 		serverAddr := listener.Addr().String()
 
@@ -618,7 +628,10 @@ func TestHandleConnection(t *testing.T) {
 				t.Logf("Client dial failed: %v", err)
 				return
 			}
-			defer client.Close()
+			defer func(client *ssh.Client) {
+				err = client.Close()
+				assert.NoError(t, err)
+			}(client)
 
 			type forwardPayload struct {
 				BindAddr string
@@ -667,7 +680,10 @@ func TestHandleConnection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer listener.Close()
+		defer func(listener net.Listener) {
+			err = listener.Close()
+			assert.NoError(t, err)
+		}(listener)
 
 		serverAddr := listener.Addr().String()
 
@@ -707,7 +723,9 @@ func TestHandleConnection(t *testing.T) {
 				t.Logf("Client dial failed: %v", err)
 				return
 			}
-			defer client.Close()
+			defer func(client *ssh.Client) {
+				_ = client.Close()
+			}(client)
 
 			type forwardPayload struct {
 				BindAddr string
@@ -762,7 +780,8 @@ func TestHandleConnection(t *testing.T) {
 			done <- true
 		}()
 
-		clientConn.Close()
+		err := clientConn.Close()
+		assert.NoError(t, err)
 
 		select {
 		case <-done:
@@ -824,9 +843,9 @@ func TestIntegration(t *testing.T) {
 		go s.Start()
 
 		time.Sleep(50 * time.Millisecond)
-		conn1Client.Close()
+		_ = conn1Client.Close()
 		time.Sleep(50 * time.Millisecond)
-		conn2Client.Close()
+		_ = conn2Client.Close()
 		time.Sleep(100 * time.Millisecond)
 
 		mockListener.AssertExpectations(t)
@@ -843,7 +862,8 @@ func TestErrorHandling(t *testing.T) {
 		sshConfig, _ := getTestSSHConfig()
 
 		serverConn, clientConn := net.Pipe()
-		clientConn.Close()
+		err := clientConn.Close()
+		assert.NoError(t, err)
 
 		s := &server{
 			randomizer:      mockRandom,

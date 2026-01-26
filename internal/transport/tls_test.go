@@ -80,13 +80,15 @@ func createTestCert(t *testing.T, domain string, wildcard bool, expired bool, so
 	assert.NoError(t, err)
 	err = pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
 	assert.NoError(t, err)
-	certOut.Close()
+	err = certOut.Close()
+	assert.NoError(t, err)
 
 	keyOut, err := os.CreateTemp("", "key*.pem")
 	assert.NoError(t, err)
 	err = pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
 	assert.NoError(t, err)
-	keyOut.Close()
+	err = keyOut.Close()
+	assert.NoError(t, err)
 
 	return certOut.Name(), keyOut.Name()
 }
@@ -98,7 +100,8 @@ func setupTestDir(t *testing.T) string {
 	assert.NoError(t, err)
 
 	t.Cleanup(func() {
-		os.RemoveAll(tmpDir)
+		err = os.RemoveAll(tmpDir)
+		assert.NoError(t, err)
 	})
 
 	return tmpDir
@@ -126,8 +129,11 @@ func TestValidateCertDomains(t *testing.T) {
 				assert.NoError(t, err)
 				_, err = tmpFile.WriteString("not a pem")
 				assert.NoError(t, err)
-				tmpFile.Close()
-				return tmpFile.Name(), func() { os.Remove(tmpFile.Name()) }
+				err = tmpFile.Close()
+				assert.NoError(t, err)
+				return tmpFile.Name(), func() {
+					_ = os.Remove(tmpFile.Name())
+				}
 			},
 			domain:   "example.com",
 			expected: false,
@@ -137,8 +143,8 @@ func TestValidateCertDomains(t *testing.T) {
 			setup: func(t *testing.T) (string, func()) {
 				certPath, keyPath := createTestCert(t, "example.com", true, false, false)
 				return certPath, func() {
-					os.Remove(certPath)
-					os.Remove(keyPath)
+					_ = os.Remove(certPath)
+					_ = os.Remove(keyPath)
 				}
 			},
 			domain:   "example.com",
@@ -149,8 +155,8 @@ func TestValidateCertDomains(t *testing.T) {
 			setup: func(t *testing.T) (string, func()) {
 				certPath, keyPath := createTestCert(t, "example.com", true, true, false)
 				return certPath, func() {
-					os.Remove(certPath)
-					os.Remove(keyPath)
+					_ = os.Remove(certPath)
+					_ = os.Remove(keyPath)
 				}
 			},
 			domain:   "example.com",
@@ -161,8 +167,8 @@ func TestValidateCertDomains(t *testing.T) {
 			setup: func(t *testing.T) (string, func()) {
 				certPath, keyPath := createTestCert(t, "example.com", true, false, true)
 				return certPath, func() {
-					os.Remove(certPath)
-					os.Remove(keyPath)
+					_ = os.Remove(certPath)
+					_ = os.Remove(keyPath)
 				}
 			},
 			domain:   "example.com",
@@ -173,8 +179,8 @@ func TestValidateCertDomains(t *testing.T) {
 			setup: func(t *testing.T) (string, func()) {
 				certPath, keyPath := createTestCert(t, "example.com", false, false, false)
 				return certPath, func() {
-					os.Remove(certPath)
-					os.Remove(keyPath)
+					_ = os.Remove(certPath)
+					_ = os.Remove(keyPath)
 				}
 			},
 			domain:   "example.com",
@@ -205,8 +211,8 @@ func TestLoadAndParseCertificate(t *testing.T) {
 			setup: func(t *testing.T) (string, func()) {
 				certPath, keyPath := createTestCert(t, "example.com", true, false, false)
 				return certPath, func() {
-					os.Remove(certPath)
-					os.Remove(keyPath)
+					_ = os.Remove(certPath)
+					_ = os.Remove(keyPath)
 				}
 			},
 			wantError: false,
@@ -275,8 +281,14 @@ func TestIsCertificateValid(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			certPath, keyPath := createTestCert(t, "example.com", true, tt.expired, tt.soon)
-			defer os.Remove(certPath)
-			defer os.Remove(keyPath)
+			defer func(name string) {
+				err := os.Remove(name)
+				assert.NoError(t, err)
+			}(certPath)
+			defer func(name string) {
+				err := os.Remove(name)
+				assert.NoError(t, err)
+			}(keyPath)
 
 			cert, err := loadAndParseCertificate(certPath)
 			assert.NoError(t, err)
@@ -289,8 +301,14 @@ func TestIsCertificateValid(t *testing.T) {
 
 func TestExtractCertDomains(t *testing.T) {
 	certPath, keyPath := createTestCert(t, "example.com", true, false, false)
-	defer os.Remove(certPath)
-	defer os.Remove(keyPath)
+	defer func(name string) {
+		err := os.Remove(name)
+		assert.NoError(t, err)
+	}(certPath)
+	defer func(name string) {
+		err := os.Remove(name)
+		assert.NoError(t, err)
+	}(keyPath)
 
 	cert, err := loadAndParseCertificate(certPath)
 	assert.NoError(t, err)
@@ -381,8 +399,8 @@ func TestTLSManager_getCertificate(t *testing.T) {
 			setup: func(t *testing.T) *tlsManager {
 				certPath, keyPath := createTestCert(t, "example.com", true, false, false)
 				t.Cleanup(func() {
-					os.Remove(certPath)
-					os.Remove(keyPath)
+					_ = os.Remove(certPath)
+					_ = os.Remove(keyPath)
 				})
 
 				cert, err := tls.LoadX509KeyPair(certPath, keyPath)
@@ -447,8 +465,9 @@ func TestTLSManager_userCertsExistAndValid(t *testing.T) {
 				mockCfg.On("Domain").Return("example.com")
 
 				certPath, keyPath := createTestCert(t, "example.com", true, false, false)
-				t.Cleanup(func() { os.Remove(certPath) })
-				os.Remove(keyPath)
+				t.Cleanup(func() { _ = os.Remove(certPath) })
+				err := os.Remove(keyPath)
+				assert.NoError(t, err)
 
 				return &tlsManager{
 					config:   mockCfg,
@@ -471,8 +490,14 @@ func TestTLSManager_userCertsExistAndValid(t *testing.T) {
 
 func TestTLSManager_certFilesExist(t *testing.T) {
 	certPath, keyPath := createTestCert(t, "example.com", true, false, false)
-	defer os.Remove(certPath)
-	defer os.Remove(keyPath)
+	defer func(name string) {
+		err := os.Remove(name)
+		assert.NoError(t, err)
+	}(certPath)
+	defer func(name string) {
+		err := os.Remove(name)
+		assert.NoError(t, err)
+	}(keyPath)
 
 	tm := &tlsManager{
 		certPath: certPath,
@@ -494,8 +519,8 @@ func TestTLSManager_loadUserCerts(t *testing.T) {
 			setup: func(t *testing.T) *tlsManager {
 				certPath, keyPath := createTestCert(t, "example.com", true, false, false)
 				t.Cleanup(func() {
-					os.Remove(certPath)
-					os.Remove(keyPath)
+					_ = os.Remove(certPath)
+					_ = os.Remove(keyPath)
 				})
 
 				return &tlsManager{
@@ -550,8 +575,14 @@ func TestCreateTLSManager(t *testing.T) {
 
 func TestNewCertWatcher(t *testing.T) {
 	certPath, keyPath := createTestCert(t, "example.com", true, false, false)
-	defer os.Remove(certPath)
-	defer os.Remove(keyPath)
+	defer func(name string) {
+		err := os.Remove(name)
+		assert.NoError(t, err)
+	}(certPath)
+	defer func(name string) {
+		err := os.Remove(name)
+		assert.NoError(t, err)
+	}(keyPath)
 
 	mockCfg := &MockConfig{}
 
@@ -571,8 +602,14 @@ func TestNewCertWatcher(t *testing.T) {
 
 func TestCertWatcher_filesModified(t *testing.T) {
 	certPath, keyPath := createTestCert(t, "example.com", true, false, false)
-	defer os.Remove(certPath)
-	defer os.Remove(keyPath)
+	defer func(name string) {
+		err := os.Remove(name)
+		assert.NoError(t, err)
+	}(certPath)
+	defer func(name string) {
+		err := os.Remove(name)
+		assert.NoError(t, err)
+	}(keyPath)
 
 	mockCfg := &MockConfig{}
 
@@ -600,8 +637,14 @@ func TestCertWatcher_filesModified(t *testing.T) {
 
 func TestCertWatcher_updateModTimes(t *testing.T) {
 	certPath, keyPath := createTestCert(t, "example.com", true, false, false)
-	defer os.Remove(certPath)
-	defer os.Remove(keyPath)
+	defer func(name string) {
+		err := os.Remove(name)
+		assert.NoError(t, err)
+	}(certPath)
+	defer func(name string) {
+		err := os.Remove(name)
+		assert.NoError(t, err)
+	}(keyPath)
 
 	mockCfg := &MockConfig{}
 
@@ -637,8 +680,8 @@ func TestCertWatcher_getFileInfo(t *testing.T) {
 			setup: func(t *testing.T) *tlsManager {
 				certPath, keyPath := createTestCert(t, "example.com", true, false, false)
 				t.Cleanup(func() {
-					os.Remove(certPath)
-					os.Remove(keyPath)
+					_ = os.Remove(certPath)
+					_ = os.Remove(keyPath)
 				})
 
 				return &tlsManager{
@@ -657,8 +700,9 @@ func TestCertWatcher_getFileInfo(t *testing.T) {
 			name: "missing cert file",
 			setup: func(t *testing.T) *tlsManager {
 				certPath, keyPath := createTestCert(t, "example.com", true, false, false)
-				os.Remove(certPath)
-				t.Cleanup(func() { os.Remove(keyPath) })
+				err := os.Remove(certPath)
+				assert.NoError(t, err)
+				t.Cleanup(func() { _ = os.Remove(keyPath) })
 
 				return &tlsManager{
 					config:   &MockConfig{},
@@ -672,8 +716,9 @@ func TestCertWatcher_getFileInfo(t *testing.T) {
 			name: "missing key file",
 			setup: func(t *testing.T) *tlsManager {
 				certPath, keyPath := createTestCert(t, "example.com", true, false, false)
-				os.Remove(keyPath)
-				t.Cleanup(func() { os.Remove(certPath) })
+				err := os.Remove(keyPath)
+				assert.NoError(t, err)
+				t.Cleanup(func() { _ = os.Remove(certPath) })
 
 				return &tlsManager{
 					config:   &MockConfig{},
@@ -729,8 +774,8 @@ func TestCertWatcher_checkAndReloadCerts(t *testing.T) {
 			setup: func(t *testing.T) (*tlsManager, *certWatcher) {
 				certPath, keyPath := createTestCert(t, "example.com", true, false, false)
 				t.Cleanup(func() {
-					os.Remove(certPath)
-					os.Remove(keyPath)
+					_ = os.Remove(certPath)
+					_ = os.Remove(keyPath)
 				})
 
 				tm := &tlsManager{
@@ -747,8 +792,8 @@ func TestCertWatcher_checkAndReloadCerts(t *testing.T) {
 			setup: func(t *testing.T) (*tlsManager, *certWatcher) {
 				certPath, keyPath := createTestCert(t, "example.com", true, false, false)
 				t.Cleanup(func() {
-					os.Remove(certPath)
-					os.Remove(keyPath)
+					_ = os.Remove(certPath)
+					_ = os.Remove(keyPath)
 				})
 
 				mockCfg := &MockConfig{}
@@ -792,8 +837,8 @@ func TestCertWatcher_handleCertificateChange(t *testing.T) {
 			setup: func(t *testing.T) (*tlsManager, *certWatcher, os.FileInfo, os.FileInfo) {
 				certPath, keyPath := createTestCert(t, "example.com", true, false, false)
 				t.Cleanup(func() {
-					os.Remove(certPath)
-					os.Remove(keyPath)
+					_ = os.Remove(certPath)
+					_ = os.Remove(keyPath)
 				})
 
 				mockCfg := &MockConfig{}
@@ -819,8 +864,8 @@ func TestCertWatcher_handleCertificateChange(t *testing.T) {
 			setup: func(t *testing.T) (*tlsManager, *certWatcher, os.FileInfo, os.FileInfo) {
 				certPath, keyPath := createTestCert(t, "example.com", false, false, false)
 				t.Cleanup(func() {
-					os.Remove(certPath)
-					os.Remove(keyPath)
+					_ = os.Remove(certPath)
+					_ = os.Remove(keyPath)
 				})
 
 				tmpDir := setupTestDir(t)
@@ -850,8 +895,8 @@ func TestCertWatcher_handleCertificateChange(t *testing.T) {
 			setup: func(t *testing.T) (*tlsManager, *certWatcher, os.FileInfo, os.FileInfo) {
 				certPath, keyPath := createTestCert(t, "example.com", true, false, false)
 				t.Cleanup(func() {
-					os.Remove(certPath)
-					os.Remove(keyPath)
+					_ = os.Remove(certPath)
+					_ = os.Remove(keyPath)
 				})
 
 				mockCfg := &MockConfig{}
@@ -946,8 +991,8 @@ func TestCertWatcher_watch(t *testing.T) {
 			setup: func(t *testing.T) (*tlsManager, *certWatcher) {
 				certPath, keyPath := createTestCert(t, "example.com", false, false, false)
 				t.Cleanup(func() {
-					os.Remove(certPath)
-					os.Remove(keyPath)
+					_ = os.Remove(certPath)
+					_ = os.Remove(keyPath)
 				})
 
 				tmpDir := setupTestDir(t)
@@ -976,8 +1021,8 @@ func TestCertWatcher_watch(t *testing.T) {
 			setup: func(t *testing.T) (*tlsManager, *certWatcher) {
 				certPath, keyPath := createTestCert(t, "example.com", true, false, false)
 				t.Cleanup(func() {
-					os.Remove(certPath)
-					os.Remove(keyPath)
+					_ = os.Remove(certPath)
+					_ = os.Remove(keyPath)
 				})
 
 				mockCfg := &MockConfig{}
@@ -1006,8 +1051,14 @@ func TestCertWatcher_watch(t *testing.T) {
 
 func TestCertWatcher_watch_Integration(t *testing.T) {
 	certPath, keyPath := createTestCert(t, "example.com", true, false, false)
-	defer os.Remove(certPath)
-	defer os.Remove(keyPath)
+	defer func(name string) {
+		err := os.Remove(name)
+		assert.NoError(t, err)
+	}(certPath)
+	defer func(name string) {
+		err := os.Remove(name)
+		assert.NoError(t, err)
+	}(keyPath)
 
 	mockCfg := &MockConfig{}
 	mockCfg.On("Domain").Return("example.com")
@@ -1029,8 +1080,14 @@ func TestCertWatcher_watch_Integration(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	newCertPath, newKeyPath := createTestCert(t, "example.com", true, false, false)
-	defer os.Remove(newCertPath)
-	defer os.Remove(newKeyPath)
+	defer func(name string) {
+		err = os.Remove(name)
+		assert.NoError(t, err)
+	}(newCertPath)
+	defer func(name string) {
+		err = os.Remove(name)
+		assert.NoError(t, err)
+	}(newKeyPath)
 
 	newCertData, err := os.ReadFile(newCertPath)
 	assert.NoError(t, err)
@@ -1066,8 +1123,8 @@ func TestNewTLSConfig(t *testing.T) {
 
 				certPath, keyPath := createTestCert(t, "example.com", true, false, false)
 				t.Cleanup(func() {
-					os.Remove(certPath)
-					os.Remove(keyPath)
+					_ = os.Remove(certPath)
+					_ = os.Remove(keyPath)
 				})
 
 				certData, err := os.ReadFile(certPath)
@@ -1140,8 +1197,14 @@ func TestNewTLSConfig_Singleton(t *testing.T) {
 	tmpDir := setupTestDir(t)
 
 	certPath, keyPath := createTestCert(t, "example.com", true, false, false)
-	defer os.Remove(certPath)
-	defer os.Remove(keyPath)
+	defer func(name string) {
+		err := os.Remove(name)
+		assert.NoError(t, err)
+	}(certPath)
+	defer func(name string) {
+		err := os.Remove(name)
+		assert.NoError(t, err)
+	}(keyPath)
 
 	certData, err := os.ReadFile(certPath)
 	assert.NoError(t, err)

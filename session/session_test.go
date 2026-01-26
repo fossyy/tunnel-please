@@ -7,13 +7,13 @@ import (
 	"encoding/binary"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 	"tunnel_pls/internal/config"
-	portUtil "tunnel_pls/internal/port"
 	"tunnel_pls/internal/registry"
 	"tunnel_pls/session/lifecycle"
 	"tunnel_pls/types"
@@ -122,25 +122,6 @@ func (m *mockSSHConn) User() string {
 	return m.Called().String(0)
 }
 
-type mockSSHChannel struct {
-	ssh.Channel
-	mock.Mock
-}
-
-func (m *mockSSHChannel) Close() error {
-	return m.Called().Error(0)
-}
-
-type mockNewChannel struct {
-	ssh.NewChannel
-	mock.Mock
-}
-
-func (m *mockNewChannel) Accept() (ssh.Channel, <-chan *ssh.Request, error) {
-	args := m.Called()
-	return args.Get(0).(ssh.Channel), args.Get(1).(<-chan *ssh.Request), args.Error(2)
-}
-
 func setupSSH(t *testing.T) (sConn *ssh.ServerConn, sReqs <-chan *ssh.Request, sChans <-chan ssh.NewChannel, cConn ssh.Conn, cleanup func()) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -193,7 +174,8 @@ func setupSSH(t *testing.T) (sConn *ssh.ServerConn, sReqs <-chan *ssh.Request, s
 			if newChan.ChannelType() == "session" {
 				continue
 			}
-			newChan.Reject(ssh.Prohibited, "")
+			err = newChan.Reject(ssh.Prohibited, "")
+			assert.NoError(t, err)
 		}
 	}()
 
@@ -205,9 +187,9 @@ func setupSSH(t *testing.T) (sConn *ssh.ServerConn, sReqs <-chan *ssh.Request, s
 	}
 
 	return sConnObj, sReqsChan, sChansChan, cConnObj, func() {
-		cConnObj.Close()
-		sConnObj.Close()
-		l.Close()
+		_ = cConnObj.Close()
+		_ = sConnObj.Close()
+		_ = l.Close()
 	}
 }
 
@@ -330,7 +312,9 @@ func TestHandleGlobalRequest(t *testing.T) {
 		})
 	}
 
-	cConn.Close()
+	err := cConn.Close()
+	assert.NoError(t, err)
+
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
@@ -505,11 +489,13 @@ func TestStart_Table(t *testing.T) {
 				time.Sleep(200 * time.Millisecond)
 				_, _, _ = cConn.SendRequest("tcpip-forward", true, payload)
 				time.Sleep(200 * time.Millisecond)
-				ch.Write([]byte("q"))
+				write, err := ch.Write([]byte("q"))
+				assert.NoError(t, err)
+				assert.NotZero(t, write)
 				time.Sleep(100 * time.Millisecond)
-				ch.Close()
+				_ = ch.Close()
 			}
-			cConn.Close()
+			_ = cConn.Close()
 		}()
 
 		err := s.Start()
@@ -530,9 +516,13 @@ func TestStart_Table(t *testing.T) {
 
 		go func() {
 			time.Sleep(600 * time.Millisecond)
-			_, _, _ = cConn.SendRequest("tcpip-forward", true, payload)
+			_, _, err := cConn.SendRequest("tcpip-forward", true, payload)
+			assert.NoError(t, err)
+
 			time.Sleep(100 * time.Millisecond)
-			cConn.Close()
+			err = cConn.Close()
+			assert.NoError(t, err)
+
 		}()
 
 		err := s.Start()
@@ -545,7 +535,7 @@ func TestStart_Table(t *testing.T) {
 
 		go func() {
 			time.Sleep(1200 * time.Millisecond)
-			cConn.Close()
+			_ = cConn.Close()
 		}()
 
 		err := s.Start()
@@ -554,11 +544,11 @@ func TestStart_Table(t *testing.T) {
 	})
 
 	t.Run("Unauthorized Headless", func(t *testing.T) {
-		s, conf, cConn, cleanup := setup(t)
+		_, conf, cConn, cleanup := setup(t)
 		defer cleanup()
 
 		conf.User = "UNAUTHORIZED"
-		s = New(conf).(*session)
+		s := New(conf).(*session)
 
 		payload := make([]byte, 4+9+4)
 		binary.BigEndian.PutUint32(payload[0:4], 9)
@@ -738,14 +728,17 @@ func TestForwardingFailures(t *testing.T) {
 		binary.BigEndian.PutUint32(payload[13:17], 80)
 
 		go func() {
-			_, _, _ = cConn.SendRequest("tcpip-forward", true, payload)
+			_, _, err := cConn.SendRequest("tcpip-forward", true, payload)
+			assert.Error(t, err, io.EOF)
 		}()
 
 		req := <-sReqs
-		cConn.Close()
+		err := cConn.Close()
+		assert.NoError(t, err)
+
 		time.Sleep(50 * time.Millisecond)
 
-		err := s.HandleTCPIPForward(req)
+		err = s.HandleTCPIPForward(req)
 		assert.Error(t, err)
 	})
 
@@ -759,7 +752,10 @@ func TestForwardingFailures(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer l.Close()
+		defer func(l net.Listener) {
+			err = l.Close()
+			assert.NoError(t, err)
+		}(l)
 		_, portStr, _ := net.SplitHostPort(l.Addr().String())
 		port, _ := strconv.Atoi(portStr)
 
@@ -1120,10 +1116,12 @@ func TestDenyForwardingRequest_Full(t *testing.T) {
 		s, _, _, sReqs, cConn, cleanup := setup(t)
 		defer cleanup()
 		req := getReq(t, cConn, sReqs)
-		cConn.Close()
+		err := cConn.Close()
+		assert.NoError(t, err)
+
 		time.Sleep(100 * time.Millisecond)
 
-		err := s.denyForwardingRequest(req, nil, nil, assert.AnError.Error())
+		err = s.denyForwardingRequest(req, nil, nil, assert.AnError.Error())
 		assert.Error(t, err, assert.AnError)
 	})
 }
@@ -1183,7 +1181,10 @@ func TestHandleTCPForward_Failures(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer l.Close()
+		defer func(l net.Listener) {
+			err = l.Close()
+			assert.NoError(t, err)
+		}(l)
 		port := uint16(l.Addr().(*net.TCPAddr).Port)
 
 		err = s.HandleTCPForward(getReq(t, cConn, sReqs), "localhost", port)
@@ -1213,10 +1214,11 @@ func TestHandleTCPForward_Failures(t *testing.T) {
 		mPort.On("Claim", mock.Anything).Return(true)
 		mRegistry.On("Register", mock.Anything, mock.Anything).Return(true)
 		req := getReq(t, cConn, sReqs)
-		cConn.Close()
+		err := cConn.Close()
+		assert.NoError(t, err)
 		time.Sleep(100 * time.Millisecond)
 
-		err := s.HandleTCPForward(req, "localhost", 0)
+		err = s.HandleTCPForward(req, "localhost", 0)
 		if err == nil {
 			t.Error("expected error, got nil")
 		} else if !strings.Contains(err.Error(), "Failed to finalize forwarding") {
@@ -1318,7 +1320,9 @@ func TestHandleGlobalRequest_Failures(t *testing.T) {
 		})
 	}
 
-	cConn.Close()
+	err := cConn.Close()
+	assert.NoError(t, err)
+
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
@@ -1354,19 +1358,3 @@ type mockCloser struct {
 }
 
 func (m *mockCloser) Close() error { return m.err }
-
-type mockLifecycle struct {
-	lifecycle.Lifecycle
-	closeErr error
-	conn     ssh.Conn
-	user     string
-}
-
-func (m *mockLifecycle) Close() error                         { return m.closeErr }
-func (m *mockLifecycle) Connection() ssh.Conn                 { return m.conn }
-func (m *mockLifecycle) User() string                         { return m.user }
-func (m *mockLifecycle) IsActive() bool                       { return false }
-func (m *mockLifecycle) PortRegistry() portUtil.Port          { return nil }
-func (m *mockLifecycle) SetChannel(ch ssh.Channel)            {}
-func (m *mockLifecycle) SetStatus(status types.SessionStatus) {}
-func (m *mockLifecycle) StartedAt() time.Time                 { return time.Time{} }

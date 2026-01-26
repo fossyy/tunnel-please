@@ -1,8 +1,9 @@
 package port
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestAddRange(t *testing.T) {

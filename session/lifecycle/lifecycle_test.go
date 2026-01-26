@@ -139,24 +139,6 @@ func (m *MockSSHChannel) Close() error {
 	return m.Called().Error(0)
 }
 
-type mockNewChannel struct {
-	ssh.NewChannel
-	mock.Mock
-}
-
-func (m *mockNewChannel) Accept() (ssh.Channel, <-chan *ssh.Request, error) {
-	args := m.Called()
-	return args.Get(0).(ssh.Channel), args.Get(1).(<-chan *ssh.Request), args.Error(2)
-}
-
-func (m *MockSSHConn) OpenChannel(name string, data []byte) (ssh.Channel, <-chan *ssh.Request, error) {
-	args := m.Called(name, data)
-	if args.Get(0) == nil {
-		return nil, args.Get(1).(<-chan *ssh.Request), args.Error(2)
-	}
-	return args.Get(0).(ssh.Channel), args.Get(1).(<-chan *ssh.Request), args.Error(2)
-}
-
 func TestNew(t *testing.T) {
 	mockSSHConn := new(MockSSHConn)
 	mockForwarder := &MockForwarder{}
@@ -297,7 +279,8 @@ func TestLifecycle_Close(t *testing.T) {
 			mockLifecycle.SetChannel(mockSSHChannel)
 
 			if tt.alreadyClosed {
-				mockLifecycle.Close()
+				err := mockLifecycle.Close()
+				assert.NoError(t, err)
 			}
 
 			err := mockLifecycle.Close()

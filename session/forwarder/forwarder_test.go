@@ -219,8 +219,14 @@ func (p *pipeConn) Write(b []byte) (int, error) {
 }
 
 func (p *pipeConn) Close() error {
-	p.reader.Close()
-	p.writer.Close()
+	err := p.reader.Close()
+	if err != nil {
+		return err
+	}
+	err = p.writer.Close()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -499,7 +505,8 @@ func TestOpenForwardedChannel(t *testing.T) {
 				OriginAddr string
 				OriginPort uint32
 			}
-			ssh.Unmarshal(capturedData, &payload)
+			err = ssh.Unmarshal(capturedData, &payload)
+			assert.NoError(t, err)
 			assert.Equal(t, tt.wantDestAddr, payload.DestAddr)
 			assert.Equal(t, tt.wantDestPort, payload.DestPort)
 			assert.Equal(t, tt.wantOrigAddr, payload.OriginAddr)
@@ -662,8 +669,8 @@ func TestCreateForwardedTCPIPPayload(t *testing.T) {
 				OriginPort uint32
 			}
 
-			ssh.Unmarshal(payload, &decoded)
-
+			err := ssh.Unmarshal(payload, &decoded)
+			assert.NoError(t, err)
 			assert.Equal(t, tt.wantDestAddr, decoded.DestAddr)
 			assert.Equal(t, tt.wantDestPort, decoded.DestPort)
 			assert.Equal(t, tt.wantOriginAddr, decoded.OriginAddr)
@@ -1056,9 +1063,7 @@ func TestCopyWithBuffer(t *testing.T) {
 			}
 
 			if buf, ok := dst.(*bytes.Buffer); ok && !tt.wantErr {
-				if _, ok := src.(io.Reader); ok {
-					assert.Equal(t, tt.wantBytesCount, int64(buf.Len()))
-				}
+				assert.Equal(t, tt.wantBytesCount, int64(buf.Len()))
 			}
 
 			if mr, ok := src.(*mockReader); ok {
@@ -1276,7 +1281,10 @@ func TestSetListener(t *testing.T) {
 
 			listener := tt.setupListener()
 			if listener != nil {
-				defer listener.Close()
+				defer func(listener net.Listener) {
+					err := listener.Close()
+					assert.NoError(t, err)
+				}(listener)
 			}
 
 			assert.Nil(t, forwarder.Listener())
@@ -1318,7 +1326,10 @@ func TestListener(t *testing.T) {
 
 			listener := tt.setupListener()
 			if listener != nil {
-				defer listener.Close()
+				defer func(listener net.Listener) {
+					err := listener.Close()
+					assert.NoError(t, err)
+				}(listener)
 				forwarder.SetListener(listener)
 			}
 
@@ -1356,7 +1367,8 @@ func TestClose(t *testing.T) {
 			setupListener: func() net.Listener {
 				listener, err := net.Listen("tcp", "127.0.0.1:0")
 				require.NoError(t, err)
-				listener.Close()
+				err = listener.Close()
+				assert.NoError(t, err)
 				return listener
 			},
 			wantErr: true,
@@ -1477,8 +1489,10 @@ func TestHandleConnectionWithErrors(t *testing.T) {
 				return newPipePair()
 			},
 			simulateErr: func(channel *testChannelPeer, dst *pipeConn) {
-				channel.CloseWrite()
-				dst.CloseWrite()
+				err := channel.CloseWrite()
+				assert.NoError(t, err)
+				err = dst.CloseWrite()
+				assert.NoError(t, err)
 			},
 		},
 		{
@@ -1491,10 +1505,14 @@ func TestHandleConnectionWithErrors(t *testing.T) {
 				return newPipePair()
 			},
 			simulateErr: func(channel *testChannelPeer, dst *pipeConn) {
-				dst.Close()
+				err := dst.Close()
+				assert.NoError(t, err)
 				time.Sleep(10 * time.Millisecond)
-				channel.Write([]byte("test"))
-				channel.CloseWrite()
+				write, err := channel.Write([]byte("test"))
+				assert.NotZero(t, write)
+				assert.NoError(t, err)
+				err = channel.CloseWrite()
+				assert.NoError(t, err)
 			},
 		},
 	}

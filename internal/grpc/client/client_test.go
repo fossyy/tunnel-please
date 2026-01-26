@@ -744,7 +744,9 @@ func TestNew(t *testing.T) {
 	if cli == nil {
 		t.Fatal("New() returned nil client")
 	}
-	defer cli.Close()
+	defer func(cli Client) {
+		_ = cli.Close()
+	}(cli)
 }
 
 type MockConfig struct {

@@ -37,7 +37,8 @@ func TestGetenv(t *testing.T) {
 			if tt.val != "" {
 				t.Setenv(tt.key, tt.val)
 			} else {
-				os.Unsetenv(tt.key)
+				err := os.Unsetenv(tt.key)
+				assert.NoError(t, err)
 			}
 			assert.Equal(t, tt.expected, getenv(tt.key, tt.def))
 		})
@@ -87,7 +88,8 @@ func TestGetenvBool(t *testing.T) {
 			if tt.val != "" {
 				t.Setenv(tt.key, tt.val)
 			} else {
-				os.Unsetenv(tt.key)
+				err := os.Unsetenv(tt.key)
+				assert.NoError(t, err)
 			}
 			assert.Equal(t, tt.expected, getenvBool(tt.key, tt.def))
 		})
@@ -113,7 +115,8 @@ func TestParseMode(t *testing.T) {
 			if tt.mode != "" {
 				t.Setenv("MODE", tt.mode)
 			} else {
-				os.Unsetenv("MODE")
+				err := os.Unsetenv("MODE")
+				assert.NoError(t, err)
 			}
 			mode, err := parseMode()
 			if tt.expectErr {
@@ -148,7 +151,8 @@ func TestParseAllowedPorts(t *testing.T) {
 			if tt.val != "" {
 				t.Setenv("ALLOWED_PORTS", tt.val)
 			} else {
-				os.Unsetenv("ALLOWED_PORTS")
+				err := os.Unsetenv("ALLOWED_PORTS")
+				assert.NoError(t, err)
 			}
 			start, end, err := parseAllowedPorts()
 			if tt.expectErr {
@@ -180,7 +184,8 @@ func TestParseBufferSize(t *testing.T) {
 			if tt.val != "" {
 				t.Setenv("BUFFER_SIZE", tt.val)
 			} else {
-				os.Unsetenv("BUFFER_SIZE")
+				err := os.Unsetenv("BUFFER_SIZE")
+				assert.NoError(t, err)
 			}
 			size := parseBufferSize()
 			assert.Equal(t, tt.expect, size)
@@ -206,7 +211,8 @@ func TestParseHeaderSize(t *testing.T) {
 			if tt.val != "" {
 				t.Setenv("MAX_HEADER_SIZE", tt.val)
 			} else {
-				os.Unsetenv("MAX_HEADER_SIZE")
+				err := os.Unsetenv("MAX_HEADER_SIZE")
+				assert.NoError(t, err)
 			}
 			size := parseHeaderSize()
 			assert.Equal(t, tt.expect, size)
@@ -358,7 +364,10 @@ func TestMustLoad(t *testing.T) {
 	t.Run("loadEnvFile error", func(t *testing.T) {
 		err := os.Mkdir(".env", 0755)
 		assert.NoError(t, err)
-		defer os.Remove(".env")
+		defer func() {
+			err = os.Remove(".env")
+			assert.NoError(t, err)
+		}()
 
 		cfg, err := MustLoad()
 		assert.Error(t, err)
@@ -378,7 +387,10 @@ func TestLoadEnvFile(t *testing.T) {
 	t.Run("file exists", func(t *testing.T) {
 		err := os.WriteFile(".env", []byte("TEST_ENV_FILE=true"), 0644)
 		assert.NoError(t, err)
-		defer os.Remove(".env")
+		defer func() {
+			err = os.Remove(".env")
+			assert.NoError(t, err)
+		}()
 
 		err = loadEnvFile()
 		assert.NoError(t, err)

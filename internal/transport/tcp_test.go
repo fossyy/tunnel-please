@@ -32,7 +32,8 @@ func TestTCPServer_Listen(t *testing.T) {
 	listener, err := srv.Listen()
 	assert.NoError(t, err)
 	assert.NotNil(t, listener)
-	listener.Close()
+	err = listener.Close()
+	assert.NoError(t, err)
 }
 
 func TestTCPServer_Serve(t *testing.T) {
@@ -44,7 +45,8 @@ func TestTCPServer_Serve(t *testing.T) {
 
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		listener.Close()
+		err = listener.Close()
+		assert.NoError(t, err)
 	}()
 
 	err = srv.Serve(listener)
@@ -84,9 +86,10 @@ func TestTCPServer_Serve_Success(t *testing.T) {
 	assert.NoError(t, err)
 
 	time.Sleep(100 * time.Millisecond)
-	conn.Close()
-	listener.Close()
-
+	err = conn.Close()
+	assert.NoError(t, err)
+	err = listener.Close()
+	assert.NoError(t, err)
 	mf.AssertExpectations(t)
 }
 
@@ -95,7 +98,10 @@ func TestTCPServer_handleTcp_Success(t *testing.T) {
 	srv := NewTCPServer(0, mf).(*tcp)
 
 	serverConn, clientConn := net.Pipe()
-	defer clientConn.Close()
+	defer func(clientConn net.Conn) {
+		err := clientConn.Close()
+		assert.NoError(t, err)
+	}(clientConn)
 
 	reqs := make(chan *ssh.Request)
 	mockChannel := new(MockSSHChannel)
@@ -127,7 +133,10 @@ func TestTCPServer_handleTcp_OpenChannelError(t *testing.T) {
 	srv := NewTCPServer(0, mf).(*tcp)
 
 	serverConn, clientConn := net.Pipe()
-	defer clientConn.Close()
+	defer func(clientConn net.Conn) {
+		err := clientConn.Close()
+		assert.NoError(t, err)
+	}(clientConn)
 
 	mf.On("OpenForwardedChannel", mock.Anything, mock.Anything).Return(nil, (<-chan *ssh.Request)(nil), errors.New("open error"))
 

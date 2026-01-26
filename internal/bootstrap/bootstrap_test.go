@@ -2,13 +2,7 @@ package bootstrap
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"fmt"
-	"math/big"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -20,15 +14,11 @@ import (
 	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/port"
 	"tunnel_pls/internal/registry"
-	"tunnel_pls/session/forwarder"
-	"tunnel_pls/session/interaction"
-	"tunnel_pls/session/lifecycle"
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 )
 
@@ -74,35 +64,6 @@ func (m *MockSessionRegistry) GetAllSessionFromUser(user string) []registry.Sess
 func (m *MockSessionRegistry) Slug() slug.Slug {
 	args := m.Called()
 	return args.Get(0).(slug.Slug)
-}
-
-type MockSession struct {
-	mock.Mock
-}
-
-func (m *MockSession) Lifecycle() lifecycle.Lifecycle {
-	args := m.Called()
-	return args.Get(0).(lifecycle.Lifecycle)
-}
-
-func (m *MockSession) Interaction() interaction.Interaction {
-	args := m.Called()
-	return args.Get(0).(interaction.Interaction)
-}
-
-func (m *MockSession) Forwarder() forwarder.Forwarder {
-	args := m.Called()
-	return args.Get(0).(forwarder.Forwarder)
-}
-
-func (m *MockSession) Slug() slug.Slug {
-	args := m.Called()
-	return args.Get(0).(slug.Slug)
-}
-
-func (m *MockSession) Detail() *types.Detail {
-	args := m.Called()
-	return args.Get(0).(*types.Detail)
 }
 
 type MockRandom struct {
@@ -162,24 +123,24 @@ func (m *MockPort) AddRange(startPort, endPort uint16) error {
 }
 func (m *MockPort) Unassigned() (uint16, bool) {
 	args := m.Called()
-	var port uint16
+	var mPort uint16
 	if args.Get(0) != nil {
 		switch v := args.Get(0).(type) {
 		case int:
-			port = uint16(v)
+			mPort = uint16(v)
 		case uint16:
-			port = v
+			mPort = v
 		case uint32:
-			port = uint16(v)
+			mPort = uint16(v)
 		case int32:
-			port = uint16(v)
+			mPort = uint16(v)
 		case float64:
-			port = uint16(v)
+			mPort = uint16(v)
 		default:
-			port = uint16(args.Int(0))
+			mPort = uint16(args.Int(0))
 		}
 	}
-	return port, args.Bool(1)
+	return mPort, args.Bool(1)
 }
 func (m *MockPort) SetStatus(port uint16, assigned bool) error {
 	return m.Called(port, assigned).Error(0)
@@ -281,49 +242,17 @@ func TestNew(t *testing.T) {
 	}
 }
 
-func generateTestCert(t *testing.T) (certPEM, keyPEM []byte) {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-
-	template := x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{
-			Organization: []string{"Test Co"},
-		},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().Add(time.Hour),
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-		DNSNames:              []string{"localhost"},
-		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
-	}
-
-	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
-	require.NoError(t, err)
-
-	certPEM = pem.EncodeToMemory(&pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: certDER,
-	})
-
-	keyPEM = pem.EncodeToMemory(&pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
-	})
-
-	return certPEM, keyPEM
-}
-
 func randomAvailablePort() (string, error) {
 	listener, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
 		return "", err
 	}
-	defer listener.Close()
+	defer func(listener net.Listener) {
+		_ = listener.Close()
+	}(listener)
 
-	port := listener.Addr().(*net.TCPAddr).Port
-	return strconv.Itoa(port), nil
+	mPort := listener.Addr().(*net.TCPAddr).Port
+	return strconv.Itoa(mPort), nil
 }
 
 func TestRun(t *testing.T) {
@@ -346,81 +275,81 @@ func TestRun(t *testing.T) {
 		{
 			name: "successful run and termination",
 			setupConfig: func() *MockConfig {
-				mock := &MockConfig{}
-				mock.On("KeyLoc").Return(keyLoc)
-				mock.On("Mode").Return(types.ServerModeSTANDALONE)
-				mock.On("Domain").Return("example.com")
-				mock.On("SSHPort").Return("0")
-				mock.On("HTTPPort").Return("0")
-				mock.On("HTTPSPort").Return("0")
-				mock.On("TLSEnabled").Return(false)
-				mock.On("TLSRedirect").Return(false)
-				mock.On("ACMEEmail").Return("test@example.com")
-				mock.On("CFAPIToken").Return("fake-token")
-				mock.On("ACMEStaging").Return(true)
-				mock.On("AllowedPortsStart").Return(uint16(1024))
-				mock.On("AllowedPortsEnd").Return(uint16(65535))
-				mock.On("BufferSize").Return(4096)
-				mock.On("PprofEnabled").Return(false)
-				mock.On("PprofPort").Return("0")
-				mock.On("GRPCAddress").Return("localhost")
-				mock.On("GRPCPort").Return("0")
-				mock.On("NodeToken").Return("fake-node-token")
-				return mock
+				mockConfig := &MockConfig{}
+				mockConfig.On("KeyLoc").Return(keyLoc)
+				mockConfig.On("Mode").Return(types.ServerModeSTANDALONE)
+				mockConfig.On("Domain").Return("example.com")
+				mockConfig.On("SSHPort").Return("0")
+				mockConfig.On("HTTPPort").Return("0")
+				mockConfig.On("HTTPSPort").Return("0")
+				mockConfig.On("TLSEnabled").Return(false)
+				mockConfig.On("TLSRedirect").Return(false)
+				mockConfig.On("ACMEEmail").Return("test@example.com")
+				mockConfig.On("CFAPIToken").Return("fake-token")
+				mockConfig.On("ACMEStaging").Return(true)
+				mockConfig.On("AllowedPortsStart").Return(uint16(1024))
+				mockConfig.On("AllowedPortsEnd").Return(uint16(65535))
+				mockConfig.On("BufferSize").Return(4096)
+				mockConfig.On("PprofEnabled").Return(false)
+				mockConfig.On("PprofPort").Return("0")
+				mockConfig.On("GRPCAddress").Return("localhost")
+				mockConfig.On("GRPCPort").Return("0")
+				mockConfig.On("NodeToken").Return("fake-node-token")
+				return mockConfig
 			},
 			expectError: false,
 		},
 		{
 			name: "error from SSH server invalid port",
 			setupConfig: func() *MockConfig {
-				mock := &MockConfig{}
-				mock.On("KeyLoc").Return(keyLoc)
-				mock.On("Mode").Return(types.ServerModeSTANDALONE)
-				mock.On("Domain").Return("example.com")
-				mock.On("SSHPort").Return("invalid")
-				mock.On("HTTPPort").Return("0")
-				mock.On("HTTPSPort").Return("0")
-				mock.On("TLSEnabled").Return(false)
-				mock.On("TLSRedirect").Return(false)
-				mock.On("ACMEEmail").Return("test@example.com")
-				mock.On("CFAPIToken").Return("fake-token")
-				mock.On("ACMEStaging").Return(true)
-				mock.On("AllowedPortsStart").Return(uint16(1024))
-				mock.On("AllowedPortsEnd").Return(uint16(65535))
-				mock.On("BufferSize").Return(4096)
-				mock.On("PprofEnabled").Return(false)
-				mock.On("PprofPort").Return("0")
-				mock.On("GRPCAddress").Return("localhost")
-				mock.On("GRPCPort").Return("0")
-				mock.On("NodeToken").Return("fake-node-token")
-				return mock
+				mockConfig := &MockConfig{}
+				mockConfig.On("KeyLoc").Return(keyLoc)
+				mockConfig.On("Mode").Return(types.ServerModeSTANDALONE)
+				mockConfig.On("Domain").Return("example.com")
+				mockConfig.On("SSHPort").Return("invalid")
+				mockConfig.On("HTTPPort").Return("0")
+				mockConfig.On("HTTPSPort").Return("0")
+				mockConfig.On("TLSEnabled").Return(false)
+				mockConfig.On("TLSRedirect").Return(false)
+				mockConfig.On("ACMEEmail").Return("test@example.com")
+				mockConfig.On("CFAPIToken").Return("fake-token")
+				mockConfig.On("ACMEStaging").Return(true)
+				mockConfig.On("AllowedPortsStart").Return(uint16(1024))
+				mockConfig.On("AllowedPortsEnd").Return(uint16(65535))
+				mockConfig.On("BufferSize").Return(4096)
+				mockConfig.On("PprofEnabled").Return(false)
+				mockConfig.On("PprofPort").Return("0")
+				mockConfig.On("GRPCAddress").Return("localhost")
+				mockConfig.On("GRPCPort").Return("0")
+				mockConfig.On("NodeToken").Return("fake-node-token")
+				return mockConfig
 			},
 			expectError: true,
 		},
 		{
 			name: "error from HTTP server invalid port",
 			setupConfig: func() *MockConfig {
-				mock := &MockConfig{}
-				mock.On("KeyLoc").Return(keyLoc)
-				mock.On("Mode").Return(types.ServerModeSTANDALONE)
-				mock.On("Domain").Return("example.com")
-				mock.On("SSHPort").Return("0")
-				mock.On("HTTPPort").Return("invalid")
-				mock.On("HTTPSPort").Return("0")
-				mock.On("TLSEnabled").Return(false)
-				mock.On("TLSRedirect").Return(false)
-				mock.On("ACMEEmail").Return("test@example.com")
-				mock.On("CFAPIToken").Return("fake-token")
-				mock.On("ACMEStaging").Return(true)
-				mock.On("AllowedPortsStart").Return(uint16(1024))
-				mock.On("AllowedPortsEnd").Return(uint16(65535))
-				mock.On("BufferSize").Return(4096)
-				mock.On("PprofEnabled").Return(false)
-				mock.On("PprofPort").Return("0")
-				mock.On("GRPCAddress").Return("localhost")
-				mock.On("GRPCPort").Return("0")
-				mock.On("NodeToken").Return("fake-node-token")
-				return mock
+				mockConfig := &MockConfig{}
+				mockConfig.On("KeyLoc").Return(keyLoc)
+				mockConfig.On("Mode").Return(types.ServerModeSTANDALONE)
+				mockConfig.On("Domain").Return("example.com")
+				mockConfig.On("SSHPort").Return("0")
+				mockConfig.On("HTTPPort").Return("invalid")
+				mockConfig.On("HTTPSPort").Return("0")
+				mockConfig.On("TLSEnabled").Return(false)
+				mockConfig.On("TLSRedirect").Return(false)
+				mockConfig.On("ACMEEmail").Return("test@example.com")
+				mockConfig.On("CFAPIToken").Return("fake-token")
+				mockConfig.On("ACMEStaging").Return(true)
+				mockConfig.On("AllowedPortsStart").Return(uint16(1024))
+				mockConfig.On("AllowedPortsEnd").Return(uint16(65535))
+				mockConfig.On("BufferSize").Return(4096)
+				mockConfig.On("PprofEnabled").Return(false)
+				mockConfig.On("PprofPort").Return("0")
+				mockConfig.On("GRPCAddress").Return("localhost")
+				mockConfig.On("GRPCPort").Return("0")
+				mockConfig.On("NodeToken").Return("fake-node-token")
+				return mockConfig
 			},
 			expectError: true,
 		},
@@ -428,55 +357,55 @@ func TestRun(t *testing.T) {
 			name: "error from HTTPS server invalid port",
 			setupConfig: func() *MockConfig {
 				tempDir := os.TempDir()
-				mock := &MockConfig{}
-				mock.On("KeyLoc").Return(keyLoc)
-				mock.On("Mode").Return(types.ServerModeSTANDALONE)
-				mock.On("Domain").Return("example.com")
-				mock.On("SSHPort").Return("0")
-				mock.On("HTTPPort").Return("0")
-				mock.On("HTTPSPort").Return("invalid")
-				mock.On("TLSEnabled").Return(true)
-				mock.On("TLSRedirect").Return(false)
-				mock.On("TLSStoragePath").Return(tempDir)
-				mock.On("ACMEEmail").Return("test@example.com")
-				mock.On("CFAPIToken").Return("fake-token")
-				mock.On("ACMEStaging").Return(true)
-				mock.On("AllowedPortsStart").Return(uint16(1024))
-				mock.On("AllowedPortsEnd").Return(uint16(65535))
-				mock.On("BufferSize").Return(4096)
-				mock.On("PprofEnabled").Return(false)
-				mock.On("PprofPort").Return("0")
-				mock.On("GRPCAddress").Return("localhost")
-				mock.On("GRPCPort").Return("0")
-				mock.On("NodeToken").Return("fake-node-token")
-				return mock
+				mockConfig := &MockConfig{}
+				mockConfig.On("KeyLoc").Return(keyLoc)
+				mockConfig.On("Mode").Return(types.ServerModeSTANDALONE)
+				mockConfig.On("Domain").Return("example.com")
+				mockConfig.On("SSHPort").Return("0")
+				mockConfig.On("HTTPPort").Return("0")
+				mockConfig.On("HTTPSPort").Return("invalid")
+				mockConfig.On("TLSEnabled").Return(true)
+				mockConfig.On("TLSRedirect").Return(false)
+				mockConfig.On("TLSStoragePath").Return(tempDir)
+				mockConfig.On("ACMEEmail").Return("test@example.com")
+				mockConfig.On("CFAPIToken").Return("fake-token")
+				mockConfig.On("ACMEStaging").Return(true)
+				mockConfig.On("AllowedPortsStart").Return(uint16(1024))
+				mockConfig.On("AllowedPortsEnd").Return(uint16(65535))
+				mockConfig.On("BufferSize").Return(4096)
+				mockConfig.On("PprofEnabled").Return(false)
+				mockConfig.On("PprofPort").Return("0")
+				mockConfig.On("GRPCAddress").Return("localhost")
+				mockConfig.On("GRPCPort").Return("0")
+				mockConfig.On("NodeToken").Return("fake-node-token")
+				return mockConfig
 			},
 			expectError: true,
 		},
 		{
 			name: "grpc health check failed",
 			setupConfig: func() *MockConfig {
-				mock := &MockConfig{}
-				mock.On("KeyLoc").Return(keyLoc)
-				mock.On("Mode").Return(types.ServerModeNODE)
-				mock.On("Domain").Return("example.com")
-				mock.On("SSHPort").Return("0")
-				mock.On("HTTPPort").Return("0")
-				mock.On("HTTPSPort").Return("0")
-				mock.On("TLSEnabled").Return(false)
-				mock.On("TLSRedirect").Return(false)
-				mock.On("ACMEEmail").Return("test@example.com")
-				mock.On("CFAPIToken").Return("fake-token")
-				mock.On("ACMEStaging").Return(true)
-				mock.On("AllowedPortsStart").Return(uint16(1024))
-				mock.On("AllowedPortsEnd").Return(uint16(65535))
-				mock.On("BufferSize").Return(4096)
-				mock.On("PprofEnabled").Return(false)
-				mock.On("PprofPort").Return("0")
-				mock.On("GRPCAddress").Return("localhost")
-				mock.On("GRPCPort").Return("invalid")
-				mock.On("NodeToken").Return("fake-node-token")
-				return mock
+				mockConfig := &MockConfig{}
+				mockConfig.On("KeyLoc").Return(keyLoc)
+				mockConfig.On("Mode").Return(types.ServerModeNODE)
+				mockConfig.On("Domain").Return("example.com")
+				mockConfig.On("SSHPort").Return("0")
+				mockConfig.On("HTTPPort").Return("0")
+				mockConfig.On("HTTPSPort").Return("0")
+				mockConfig.On("TLSEnabled").Return(false)
+				mockConfig.On("TLSRedirect").Return(false)
+				mockConfig.On("ACMEEmail").Return("test@example.com")
+				mockConfig.On("CFAPIToken").Return("fake-token")
+				mockConfig.On("ACMEStaging").Return(true)
+				mockConfig.On("AllowedPortsStart").Return(uint16(1024))
+				mockConfig.On("AllowedPortsEnd").Return(uint16(65535))
+				mockConfig.On("BufferSize").Return(4096)
+				mockConfig.On("PprofEnabled").Return(false)
+				mockConfig.On("PprofPort").Return("0")
+				mockConfig.On("GRPCAddress").Return("localhost")
+				mockConfig.On("GRPCPort").Return("invalid")
+				mockConfig.On("NodeToken").Return("fake-node-token")
+				return mockConfig
 			},
 			setupGrpcClient: func() *MockGRPCClient {
 				mockGRPCClient := &MockGRPCClient{}
@@ -488,54 +417,54 @@ func TestRun(t *testing.T) {
 		{
 			name: "successful run with pprof enabled",
 			setupConfig: func() *MockConfig {
-				mock := &MockConfig{}
+				mockConfig := &MockConfig{}
 				pprofPort, _ := randomAvailablePort()
-				mock.On("KeyLoc").Return(keyLoc)
-				mock.On("Mode").Return(types.ServerModeSTANDALONE)
-				mock.On("Domain").Return("example.com")
-				mock.On("SSHPort").Return("0")
-				mock.On("HTTPPort").Return("0")
-				mock.On("HTTPSPort").Return("0")
-				mock.On("TLSEnabled").Return(false)
-				mock.On("TLSRedirect").Return(false)
-				mock.On("ACMEEmail").Return("test@example.com")
-				mock.On("CFAPIToken").Return("fake-token")
-				mock.On("ACMEStaging").Return(true)
-				mock.On("AllowedPortsStart").Return(uint16(1024))
-				mock.On("AllowedPortsEnd").Return(uint16(65535))
-				mock.On("BufferSize").Return(4096)
-				mock.On("PprofEnabled").Return(true)
-				mock.On("PprofPort").Return(pprofPort)
-				mock.On("GRPCAddress").Return("localhost")
-				mock.On("GRPCPort").Return("0")
-				mock.On("NodeToken").Return("fake-node-token")
-				return mock
+				mockConfig.On("KeyLoc").Return(keyLoc)
+				mockConfig.On("Mode").Return(types.ServerModeSTANDALONE)
+				mockConfig.On("Domain").Return("example.com")
+				mockConfig.On("SSHPort").Return("0")
+				mockConfig.On("HTTPPort").Return("0")
+				mockConfig.On("HTTPSPort").Return("0")
+				mockConfig.On("TLSEnabled").Return(false)
+				mockConfig.On("TLSRedirect").Return(false)
+				mockConfig.On("ACMEEmail").Return("test@example.com")
+				mockConfig.On("CFAPIToken").Return("fake-token")
+				mockConfig.On("ACMEStaging").Return(true)
+				mockConfig.On("AllowedPortsStart").Return(uint16(1024))
+				mockConfig.On("AllowedPortsEnd").Return(uint16(65535))
+				mockConfig.On("BufferSize").Return(4096)
+				mockConfig.On("PprofEnabled").Return(true)
+				mockConfig.On("PprofPort").Return(pprofPort)
+				mockConfig.On("GRPCAddress").Return("localhost")
+				mockConfig.On("GRPCPort").Return("0")
+				mockConfig.On("NodeToken").Return("fake-node-token")
+				return mockConfig
 			},
 			expectError: false,
 		}, {
 			name: "successful run in NODE mode with signal",
 			setupConfig: func() *MockConfig {
-				mock := &MockConfig{}
-				mock.On("KeyLoc").Return(keyLoc)
-				mock.On("Mode").Return(types.ServerModeNODE)
-				mock.On("Domain").Return("example.com")
-				mock.On("SSHPort").Return("0")
-				mock.On("HTTPPort").Return("0")
-				mock.On("HTTPSPort").Return("0")
-				mock.On("TLSEnabled").Return(false)
-				mock.On("TLSRedirect").Return(false)
-				mock.On("ACMEEmail").Return("test@example.com")
-				mock.On("CFAPIToken").Return("fake-token")
-				mock.On("ACMEStaging").Return(true)
-				mock.On("AllowedPortsStart").Return(uint16(1024))
-				mock.On("AllowedPortsEnd").Return(uint16(65535))
-				mock.On("BufferSize").Return(4096)
-				mock.On("PprofEnabled").Return(false)
-				mock.On("PprofPort").Return("0")
-				mock.On("GRPCAddress").Return("localhost")
-				mock.On("GRPCPort").Return("0")
-				mock.On("NodeToken").Return("fake-node-token")
-				return mock
+				mockConfig := &MockConfig{}
+				mockConfig.On("KeyLoc").Return(keyLoc)
+				mockConfig.On("Mode").Return(types.ServerModeNODE)
+				mockConfig.On("Domain").Return("example.com")
+				mockConfig.On("SSHPort").Return("0")
+				mockConfig.On("HTTPPort").Return("0")
+				mockConfig.On("HTTPSPort").Return("0")
+				mockConfig.On("TLSEnabled").Return(false)
+				mockConfig.On("TLSRedirect").Return(false)
+				mockConfig.On("ACMEEmail").Return("test@example.com")
+				mockConfig.On("CFAPIToken").Return("fake-token")
+				mockConfig.On("ACMEStaging").Return(true)
+				mockConfig.On("AllowedPortsStart").Return(uint16(1024))
+				mockConfig.On("AllowedPortsEnd").Return(uint16(65535))
+				mockConfig.On("BufferSize").Return(4096)
+				mockConfig.On("PprofEnabled").Return(false)
+				mockConfig.On("PprofPort").Return("0")
+				mockConfig.On("GRPCAddress").Return("localhost")
+				mockConfig.On("GRPCPort").Return("0")
+				mockConfig.On("NodeToken").Return("fake-node-token")
+				return mockConfig
 			},
 			setupGrpcClient: func() *MockGRPCClient {
 				mockGRPCClient := &MockGRPCClient{}
@@ -548,27 +477,27 @@ func TestRun(t *testing.T) {
 		}, {
 			name: "successful run in NODE mode with signal buf error when closing",
 			setupConfig: func() *MockConfig {
-				mock := &MockConfig{}
-				mock.On("KeyLoc").Return(keyLoc)
-				mock.On("Mode").Return(types.ServerModeNODE)
-				mock.On("Domain").Return("example.com")
-				mock.On("SSHPort").Return("0")
-				mock.On("HTTPPort").Return("0")
-				mock.On("HTTPSPort").Return("0")
-				mock.On("TLSEnabled").Return(false)
-				mock.On("TLSRedirect").Return(false)
-				mock.On("ACMEEmail").Return("test@example.com")
-				mock.On("CFAPIToken").Return("fake-token")
-				mock.On("ACMEStaging").Return(true)
-				mock.On("AllowedPortsStart").Return(uint16(1024))
-				mock.On("AllowedPortsEnd").Return(uint16(65535))
-				mock.On("BufferSize").Return(4096)
-				mock.On("PprofEnabled").Return(false)
-				mock.On("PprofPort").Return("0")
-				mock.On("GRPCAddress").Return("localhost")
-				mock.On("GRPCPort").Return("0")
-				mock.On("NodeToken").Return("fake-node-token")
-				return mock
+				mockConfig := &MockConfig{}
+				mockConfig.On("KeyLoc").Return(keyLoc)
+				mockConfig.On("Mode").Return(types.ServerModeNODE)
+				mockConfig.On("Domain").Return("example.com")
+				mockConfig.On("SSHPort").Return("0")
+				mockConfig.On("HTTPPort").Return("0")
+				mockConfig.On("HTTPSPort").Return("0")
+				mockConfig.On("TLSEnabled").Return(false)
+				mockConfig.On("TLSRedirect").Return(false)
+				mockConfig.On("ACMEEmail").Return("test@example.com")
+				mockConfig.On("CFAPIToken").Return("fake-token")
+				mockConfig.On("ACMEStaging").Return(true)
+				mockConfig.On("AllowedPortsStart").Return(uint16(1024))
+				mockConfig.On("AllowedPortsEnd").Return(uint16(65535))
+				mockConfig.On("BufferSize").Return(4096)
+				mockConfig.On("PprofEnabled").Return(false)
+				mockConfig.On("PprofPort").Return("0")
+				mockConfig.On("GRPCAddress").Return("localhost")
+				mockConfig.On("GRPCPort").Return("0")
+				mockConfig.On("NodeToken").Return("fake-node-token")
+				return mockConfig
 			},
 			setupGrpcClient: func() *MockGRPCClient {
 				mockGRPCClient := &MockGRPCClient{}
@@ -613,7 +542,8 @@ func TestRun(t *testing.T) {
 				resp, err := http.Get(fmt.Sprintf("http://localhost:%s/debug/pprof/", mockConfig.PprofPort()))
 				assert.NoError(t, err)
 				assert.Equal(t, 200, resp.StatusCode)
-				resp.Body.Close()
+				err = resp.Body.Close()
+				assert.NoError(t, err)
 				mockSignalChan <- os.Interrupt
 				err = <-done
 				assert.NoError(t, err)

@@ -10,7 +10,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-	"tunnel_pls/internal/port"
 	"tunnel_pls/internal/registry"
 	"tunnel_pls/session/forwarder"
 	"tunnel_pls/session/interaction"
@@ -95,53 +94,6 @@ func (m *MockSession) Slug() slug.Slug {
 func (m *MockSession) Detail() *types.Detail {
 	args := m.Called()
 	return args.Get(0).(*types.Detail)
-}
-
-type MockLifecycle struct {
-	mock.Mock
-}
-
-func (m *MockLifecycle) Channel() ssh.Channel {
-	args := m.Called()
-	return args.Get(0).(ssh.Channel)
-}
-
-func (m *MockLifecycle) Connection() ssh.Conn {
-	args := m.Called()
-	return args.Get(0).(ssh.Conn)
-}
-
-func (m *MockLifecycle) PortRegistry() port.Port {
-	args := m.Called()
-	return args.Get(0).(port.Port)
-}
-
-func (m *MockLifecycle) User() string {
-	args := m.Called()
-	return args.String(0)
-}
-
-func (m *MockLifecycle) SetChannel(channel ssh.Channel) {
-	m.Called(channel)
-}
-
-func (m *MockLifecycle) SetStatus(status types.SessionStatus) {
-	m.Called(status)
-}
-
-func (m *MockLifecycle) IsActive() bool {
-	args := m.Called()
-	return args.Bool(0)
-}
-
-func (m *MockLifecycle) StartedAt() time.Time {
-	args := m.Called()
-	return args.Get(0).(time.Time)
-}
-
-func (m *MockLifecycle) Close() error {
-	args := m.Called()
-	return args.Error(0)
 }
 
 type MockSSHChannel struct {
@@ -678,7 +630,10 @@ func TestHandler(t *testing.T) {
 			}
 
 			if clientConn != nil {
-				defer clientConn.Close()
+				defer func(clientConn net.Conn) {
+					err := clientConn.Close()
+					assert.NoError(t, err)
+				}(clientConn)
 			}
 
 			remoteAddr, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:12345")

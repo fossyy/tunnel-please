@@ -38,7 +38,8 @@ func TestHTTPServer_Listen(t *testing.T) {
 	listener, err := srv.Listen()
 	assert.NoError(t, err)
 	assert.NotNil(t, listener)
-	listener.Close()
+	err = listener.Close()
+	assert.NoError(t, err)
 }
 
 func TestHTTPServer_Serve(t *testing.T) {
@@ -54,7 +55,8 @@ func TestHTTPServer_Serve(t *testing.T) {
 
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		listener.Close()
+		err = listener.Close()
+		assert.NoError(t, err)
 	}()
 
 	err = srv.Serve(listener)
@@ -102,8 +104,12 @@ func TestHTTPServer_Serve_Success(t *testing.T) {
 	_, _ = conn.Write([]byte("GET / HTTP/1.1\r\nHost: ping.example.com\r\n\r\n"))
 
 	time.Sleep(100 * time.Millisecond)
-	conn.Close()
-	listener.Close()
+	err = conn.Close()
+	assert.NoError(t, err)
+
+	err = listener.Close()
+	assert.NoError(t, err)
+
 }
 
 type mockListener struct {

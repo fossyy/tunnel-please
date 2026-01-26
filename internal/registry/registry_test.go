@@ -1,9 +1,6 @@
 package registry
 
 import (
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +10,10 @@ import (
 	"tunnel_pls/session/lifecycle"
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"golang.org/x/crypto/ssh"
 )

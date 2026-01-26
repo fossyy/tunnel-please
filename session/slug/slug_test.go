@@ -83,11 +83,6 @@ func (suite *SlugTestSuite) TestMultipleSet() {
 	assert.Equal(suite.T(), "", suite.slug.String())
 }
 
-func TestSlugInterface(t *testing.T) {
-	var _ Slug = (*slug)(nil)
-	var _ Slug = New()
-}
-
 func TestSlugIsolation(t *testing.T) {
 	slug1 := New()
 	slug2 := New()
