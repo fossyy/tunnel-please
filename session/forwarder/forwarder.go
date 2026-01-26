@@ -46,16 +46,17 @@ func New(config config.Config, slug slug.Slug, conn ssh.Conn) Forwarder {
 		bufferPool: sync.Pool{
 			New: func() interface{} {
 				bufSize := config.BufferSize()
-				return make([]byte, bufSize)
+				buf := make([]byte, bufSize)
+				return &buf
 			},
 		},
 	}
 }
 
 func (f *forwarder) copyWithBuffer(dst io.Writer, src io.Reader) (written int64, err error) {
-	buf := f.bufferPool.Get().([]byte)
+	buf := f.bufferPool.Get().(*[]byte)
 	defer f.bufferPool.Put(buf)
-	return io.CopyBuffer(dst, src, buf)
+	return io.CopyBuffer(dst, src, *buf)
 }
 
 func (f *forwarder) OpenForwardedChannel(ctx context.Context, origin net.Addr) (ssh.Channel, <-chan *ssh.Request, error) {
