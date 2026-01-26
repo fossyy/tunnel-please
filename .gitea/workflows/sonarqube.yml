@@ -66,3 +66,5 @@ jobs:
             -Dsonar.exclusions=**/*_test.go,**/vendor/**,**/golangci-lint-report.xml
             -Dsonar.go.govet.reportPaths=vet-results.txt
             -Dsonar.go.golangci-lint.reportPaths=golangci-lint-report.xml
+            -Dsonar.sources=./
+            -Dsonar.tests=./
