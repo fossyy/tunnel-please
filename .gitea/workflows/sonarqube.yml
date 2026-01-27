@@ -40,18 +40,6 @@ jobs:
             --output.text.path=stdout
             --output.checkstyle.path=golangci-lint-report.xml
 
-      - name: Set SonarQube project key
-        run: |
-          BRANCH_NAME=${GITHUB_REF#refs/heads/}
-           if [ "$BRANCH_NAME" = "main" ]; then
-            SONAR_PROJECT_KEY="tunnel-please"
-          else
-            BRANCH_KEY=${BRANCH_NAME//\//-}
-            SONAR_PROJECT_KEY="tunnel-please-$BRANCH_KEY"
-          fi
-          echo "SONAR_PROJECT_KEY=tunnel-please-$BRANCH_KEY" >> $GITHUB_ENV
-          echo "Using SonarQube Project Key: $SONAR_PROJECT_KEY"
-
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v7.0.0
         env:
@@ -59,7 +47,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONARQUBE_TOKEN }}
         with:
           args: >
-            -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
+            -Dsonar.projectKey=tunnel-please
             -Dsonar.go.coverage.reportPaths=coverage
             -Dsonar.test.inclusions=**/*_test.go
             -Dsonar.test.exclusions=**/vendor/**
