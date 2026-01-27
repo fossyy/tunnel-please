@@ -3,6 +3,7 @@ package interaction
 import (
 	"context"
 	"log"
+	"sync"
 	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/random"
 	"tunnel_pls/session/slug"
@@ -52,6 +53,7 @@ type interaction struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	mode            types.InteractiveMode
+	programMu       sync.Mutex
 }
 
 func (i *interaction) SetMode(m types.InteractiveMode) {
@@ -103,6 +105,10 @@ func (i *interaction) Stop() {
 	if i.cancel != nil {
 		i.cancel()
 	}
+
+	i.programMu.Lock()
+	defer i.programMu.Unlock()
+
 	if i.program != nil {
 		i.program.Kill()
 		i.program = nil
@@ -238,6 +244,7 @@ func (i *interaction) Start() {
 		help: help.New(),
 	}
 
+	i.programMu.Lock()
 	i.program = tea.NewProgram(
 		m,
 		tea.WithInput(i.channel),
@@ -248,13 +255,20 @@ func (i *interaction) Start() {
 		tea.WithoutSignalHandler(),
 		tea.WithFPS(30),
 	)
+	i.programMu.Unlock()
 
 	_, err := i.program.Run()
 	if err != nil {
 		log.Printf("Cannot close tea: %s \n", err)
 	}
-	i.program.Kill()
-	i.program = nil
+
+	i.programMu.Lock()
+	if i.program != nil {
+		i.program.Kill()
+		i.program = nil
+	}
+	i.programMu.Unlock()
+
 	if i.closeFunc != nil {
 		_ = i.closeFunc()
 	}
