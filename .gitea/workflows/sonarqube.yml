@@ -1,7 +1,9 @@
 on:
   push:
-  pull_request:
-    types: [opened, synchronize, reopened]
+    branches:
+      - main
+      - staging
+      - 'feat/**'
 
 name: SonarQube Scan
 jobs:
@@ -17,7 +19,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.6'
+          go-version: 'stable'
           cache: false
 
       - name: Install dependencies
@@ -28,7 +30,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          go test ./... -v -coverprofile=coverage
+          go test ./... -v -p 4 -coverprofile=coverage
 
       - name: Run GolangCI-Lint Analysis
         uses: golangci/golangci-lint-action@v9
