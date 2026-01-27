@@ -5,31 +5,30 @@ import (
 	"errors"
 	"log"
 	"net"
+	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/registry"
 )
 
 type https struct {
+	config      config.Config
 	tlsConfig   *tls.Config
 	httpHandler *httpHandler
-	domain      string
-	port        string
 }
 
-func NewHTTPSServer(domain, port string, sessionRegistry registry.Registry, redirectTLS bool, tlsConfig *tls.Config) Transport {
+func NewHTTPSServer(config config.Config, sessionRegistry registry.Registry, tlsConfig *tls.Config) Transport {
 	return &https{
+		config:      config,
 		tlsConfig:   tlsConfig,
-		httpHandler: newHTTPHandler(domain, sessionRegistry, redirectTLS),
-		domain:      domain,
-		port:        port,
+		httpHandler: newHTTPHandler(config, sessionRegistry),
 	}
 }
 
 func (ht *https) Listen() (net.Listener, error) {
-	return tls.Listen("tcp", ":"+ht.port, ht.tlsConfig)
+	return tls.Listen("tcp", ":"+ht.config.HTTPSPort(), ht.tlsConfig)
 }
 
 func (ht *https) Serve(listener net.Listener) error {
-	log.Printf("HTTPS server is starting on port %s", ht.port)
+	log.Printf("HTTPS server is starting on port %s", ht.config.HTTPSPort())
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -40,6 +39,6 @@ func (ht *https) Serve(listener net.Listener) error {
 			continue
 		}
 
-		go ht.httpHandler.handler(conn, true)
+		go ht.httpHandler.Handler(conn, true)
 	}
 }

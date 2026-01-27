@@ -23,164 +23,194 @@ func (m *model) dashboardUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) dashboardView() string {
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#7D56F4")).
-		PaddingTop(1)
-
-	subtitleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#888888")).
-		Italic(true)
-
-	urlStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#7D56F4")).
-		Underline(true).
-		Italic(true)
-
-	urlBoxStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#04B575")).
-		Bold(true).
-		Italic(true)
-
-	keyHintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#7D56F4")).
-		Bold(true)
+	isCompact := shouldUseCompactLayout(m.width, BreakpointLarge)
 
 	var b strings.Builder
+	b.WriteString(m.renderHeader(isCompact))
+	b.WriteString(m.renderUserInfo(isCompact))
+	b.WriteString(m.renderQuickActions(isCompact))
+	b.WriteString(m.renderFooter(isCompact))
 
-	isCompact := shouldUseCompactLayout(m.width, 85)
+	return b.String()
+}
 
-	var asciiArtMargin int
-	if isCompact {
-		asciiArtMargin = 0
-	} else {
-		asciiArtMargin = 1
-	}
+func (m *model) renderHeader(isCompact bool) string {
+	var b strings.Builder
 
+	asciiArtMargin := getMarginValue(isCompact, 0, 1)
 	asciiArtStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7D56F4")).
+		Foreground(lipgloss.Color(ColorPrimary)).
 		MarginBottom(asciiArtMargin)
 
-	var asciiArt string
-	if shouldUseCompactLayout(m.width, 50) {
-		asciiArt = "TUNNEL PLS"
-	} else if isCompact {
-		asciiArt = `
+	b.WriteString(asciiArtStyle.Render(m.getASCIIArt()))
+	b.WriteString("\n")
+
+	if !shouldUseCompactLayout(m.width, BreakpointSmall) {
+		b.WriteString(m.renderSubtitle())
+	} else {
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func (m *model) getASCIIArt() string {
+	if shouldUseCompactLayout(m.width, BreakpointTiny) {
+		return "TUNNEL PLS"
+	}
+
+	if shouldUseCompactLayout(m.width, BreakpointLarge) {
+		return `
  ▀█▀ █ █ █▄ █ █▄ █ ██▀ █   ▄▀▀ █   ▄▀▀
   █  ▀▄█ █ ▀█ █ ▀█ █▄▄ █▄▄ ▄█▀ █▄▄ ▄█▀`
-	} else {
-		asciiArt = `
+	}
+
+	return `
  ████████╗██╗   ██╗███╗   ██╗███╗   ██╗███████╗██╗         ██████╗ ██╗     ███████╗
  ╚══██╔══╝██║   ██║████╗  ██║████╗  ██║██╔════╝██║         ██╔══██╗██║     ██╔════╝
     ██║   ██║   ██║██╔██╗ ██║██╔██╗ ██║█████╗  ██║         ██████╔╝██║     ███████╗
     ██║   ██║   ██║██║╚██╗██║██║╚██╗██║██╔══╝  ██║         ██╔═══╝ ██║     ╚════██║
     ██║   ╚██████╔╝██║ ╚████║██║ ╚████║███████╗███████╗    ██║     ███████╗███████║
     ╚═╝    ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═══╝╚══════╝╚══════╝    ╚═╝     ╚══════╝╚══════╝`
-	}
+}
 
-	b.WriteString(asciiArtStyle.Render(asciiArt))
-	b.WriteString("\n")
+func (m *model) renderSubtitle() string {
+	subtitleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorGray)).
+		Italic(true)
 
-	if !shouldUseCompactLayout(m.width, 60) {
-		b.WriteString(subtitleStyle.Render("Secure tunnel service by Bagas • "))
-		b.WriteString(urlStyle.Render("https://fossy.my.id"))
-		b.WriteString("\n\n")
-	} else {
-		b.WriteString("\n")
-	}
+	urlStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorPrimary)).
+		Underline(true).
+		Italic(true)
 
+	return subtitleStyle.Render("Secure tunnel service by Bagas • ") +
+		urlStyle.Render("https://fossy.my.id") + "\n\n"
+}
+
+func (m *model) renderUserInfo(isCompact bool) string {
 	boxMaxWidth := getResponsiveWidth(m.width, 10, 40, 80)
-	var boxPadding int
-	var boxMargin int
-	if isCompact {
-		boxPadding = 1
-		boxMargin = 1
-	} else {
-		boxPadding = 2
-		boxMargin = 2
-	}
+	boxPadding := getMarginValue(isCompact, 1, 2)
+	boxMargin := getMarginValue(isCompact, 1, 2)
 
 	responsiveInfoBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7D56F4")).
+		BorderForeground(lipgloss.Color(ColorPrimary)).
 		Padding(1, boxPadding).
 		MarginTop(boxMargin).
 		MarginBottom(boxMargin).
 		Width(boxMaxWidth)
 
-	authenticatedUser := m.interaction.user
+	infoContent := m.getUserInfoContent(isCompact)
+	return responsiveInfoBox.Render(infoContent) + "\n"
+}
 
+func (m *model) getUserInfoContent(isCompact bool) string {
 	userInfoStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FAFAFA")).
+		Foreground(lipgloss.Color(ColorWhite)).
 		Bold(true)
 
 	sectionHeaderStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#888888")).
+		Foreground(lipgloss.Color(ColorGray)).
 		Bold(true)
 
 	addressStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FAFAFA"))
+		Foreground(lipgloss.Color(ColorWhite))
 
-	var infoContent string
-	if shouldUseCompactLayout(m.width, 70) {
-		infoContent = fmt.Sprintf("👤 %s\n\n%s\n%s",
+	urlBoxStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorSecondary)).
+		Bold(true).
+		Italic(true)
+
+	authenticatedUser := m.interaction.user
+	tunnelURL := urlBoxStyle.Render(m.getTunnelURL())
+
+	if isCompact {
+		return fmt.Sprintf("👤 %s\n\n%s\n%s",
 			userInfoStyle.Render(authenticatedUser),
 			sectionHeaderStyle.Render("🌐 FORWARDING ADDRESS:"),
-			addressStyle.Render(fmt.Sprintf("   %s", urlBoxStyle.Render(m.getTunnelURL()))))
-	} else {
-		infoContent = fmt.Sprintf("👤  Authenticated as: %s\n\n%s\n     %s",
-			userInfoStyle.Render(authenticatedUser),
-			sectionHeaderStyle.Render("🌐  FORWARDING ADDRESS:"),
-			addressStyle.Render(urlBoxStyle.Render(m.getTunnelURL())))
+			addressStyle.Render(fmt.Sprintf("   %s", tunnelURL)))
 	}
 
-	b.WriteString(responsiveInfoBox.Render(infoContent))
+	return fmt.Sprintf("👤  Authenticated as: %s\n\n%s\n     %s",
+		userInfoStyle.Render(authenticatedUser),
+		sectionHeaderStyle.Render("🌐  FORWARDING ADDRESS:"),
+		addressStyle.Render(tunnelURL))
+}
+
+func (m *model) renderQuickActions(isCompact bool) string {
+	var b strings.Builder
+
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(ColorPrimary)).
+		PaddingTop(1)
+
+	b.WriteString(titleStyle.Render(m.getQuickActionsTitle()))
 	b.WriteString("\n")
 
-	var quickActionsTitle string
-	if shouldUseCompactLayout(m.width, 50) {
-		quickActionsTitle = "Actions"
-	} else if isCompact {
-		quickActionsTitle = "Quick Actions"
-	} else {
-		quickActionsTitle = "✨ Quick Actions"
-	}
-	b.WriteString(titleStyle.Render(quickActionsTitle))
-	b.WriteString("\n")
-
-	var featureMargin int
-	if isCompact {
-		featureMargin = 1
-	} else {
-		featureMargin = 2
-	}
-
-	compactFeatureStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FAFAFA")).
+	featureMargin := getMarginValue(isCompact, 1, 2)
+	featureStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorWhite)).
 		MarginLeft(featureMargin)
 
-	var commandsText string
-	var quitText string
-	if shouldUseCompactLayout(m.width, 60) {
-		commandsText = fmt.Sprintf("  %s  Commands", keyHintStyle.Render("[C]"))
-		quitText = fmt.Sprintf("  %s  Quit", keyHintStyle.Render("[Q]"))
-	} else {
-		commandsText = fmt.Sprintf("  %s  Open commands menu", keyHintStyle.Render("[C]"))
-		quitText = fmt.Sprintf("  %s  Quit application", keyHintStyle.Render("[Q]"))
-	}
+	keyHintStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorPrimary)).
+		Bold(true)
 
-	b.WriteString(compactFeatureStyle.Render(commandsText))
+	commands := m.getActionCommands(keyHintStyle)
+	b.WriteString(featureStyle.Render(commands.commandsText))
 	b.WriteString("\n")
-	b.WriteString(compactFeatureStyle.Render(quitText))
-
-	if !shouldUseCompactLayout(m.width, 70) {
-		b.WriteString("\n\n")
-		footerStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#666666")).
-			Italic(true)
-		b.WriteString(footerStyle.Render("Press 'C' to customize your tunnel settings"))
-	}
+	b.WriteString(featureStyle.Render(commands.quitText))
 
 	return b.String()
+}
+
+func (m *model) getQuickActionsTitle() string {
+	if shouldUseCompactLayout(m.width, BreakpointTiny) {
+		return "Actions"
+	}
+	if shouldUseCompactLayout(m.width, BreakpointLarge) {
+		return "Quick Actions"
+	}
+	return "✨ Quick Actions"
+}
+
+type actionCommands struct {
+	commandsText string
+	quitText     string
+}
+
+func (m *model) getActionCommands(keyHintStyle lipgloss.Style) actionCommands {
+	if shouldUseCompactLayout(m.width, BreakpointSmall) {
+		return actionCommands{
+			commandsText: fmt.Sprintf("  %s  Commands", keyHintStyle.Render("[C]")),
+			quitText:     fmt.Sprintf("  %s  Quit", keyHintStyle.Render("[Q]")),
+		}
+	}
+
+	return actionCommands{
+		commandsText: fmt.Sprintf("  %s  Open commands menu", keyHintStyle.Render("[C]")),
+		quitText:     fmt.Sprintf("  %s  Quit application", keyHintStyle.Render("[Q]")),
+	}
+}
+
+func (m *model) renderFooter(isCompact bool) string {
+	if isCompact {
+		return ""
+	}
+
+	footerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorDarkGray)).
+		Italic(true)
+
+	return "\n\n" + footerStyle.Render("Press 'C' to customize your tunnel settings")
+}
+
+func getMarginValue(isCompact bool, compactValue, normalValue int) int {
+	if isCompact {
+		return compactValue
+	}
+	return normalValue
 }

@@ -1,27 +1,28 @@
 package transport
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
 
 type tcp struct {
 	port      uint16
-	forwarder forwarder
+	forwarder Forwarder
 }
 
-type forwarder interface {
-	CreateForwardedTCPIPPayload(origin net.Addr) []byte
-	OpenForwardedChannel(payload []byte) (ssh.Channel, <-chan *ssh.Request, error)
+type Forwarder interface {
+	OpenForwardedChannel(ctx context.Context, origin net.Addr) (ssh.Channel, <-chan *ssh.Request, error)
 	HandleConnection(dst io.ReadWriter, src ssh.Channel)
 }
 
-func NewTCPServer(port uint16, forwarder forwarder) Transport {
+func NewTCPServer(port uint16, forwarder Forwarder) Transport {
 	return &tcp{
 		port:      port,
 		forwarder: forwarder,
@@ -53,11 +54,11 @@ func (tt *tcp) handleTcp(conn net.Conn) {
 			log.Printf("Failed to close connection: %v", err)
 		}
 	}()
-	payload := tt.forwarder.CreateForwardedTCPIPPayload(conn.RemoteAddr())
-	channel, reqs, err := tt.forwarder.OpenForwardedChannel(payload)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	channel, reqs, err := tt.forwarder.OpenForwardedChannel(ctx, conn.RemoteAddr())
 	if err != nil {
 		log.Printf("Failed to open forwarded-tcpip channel: %v", err)
-
 		return
 	}
 

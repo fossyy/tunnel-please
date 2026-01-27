@@ -5,6 +5,8 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -12,7 +14,20 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+var (
+	rsaGenerateKey  = rsa.GenerateKey
+	pemEncode       = pem.Encode
+	sshNewPublicKey = func(key interface{}) (ssh.PublicKey, error) {
+		return ssh.NewPublicKey(key)
+	}
+	pubKeyWrite = func(w io.Writer, data []byte) (int, error) {
+		return w.Write(data)
+	}
+	osOpenFile = os.OpenFile
+)
+
 func GenerateSSHKeyIfNotExist(keyPath string) error {
+	var errGroup = make([]error, 0)
 	if _, err := os.Stat(keyPath); err == nil {
 		log.Printf("SSH key already exists at %s", keyPath)
 		return nil
@@ -20,7 +35,7 @@ func GenerateSSHKeyIfNotExist(keyPath string) error {
 
 	log.Printf("SSH key not found at %s, generating new key pair...", keyPath)
 
-	privateKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	privateKey, err := rsaGenerateKey(rand.Reader, 4096)
 	if err != nil {
 		return err
 	}
@@ -35,33 +50,37 @@ func GenerateSSHKeyIfNotExist(keyPath string) error {
 		return err
 	}
 
-	privateKeyFile, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	privateKeyFile, err := osOpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
-	defer privateKeyFile.Close()
+	defer func(privateKeyFile *os.File) {
+		errGroup = append(errGroup, privateKeyFile.Close())
+	}(privateKeyFile)
 
-	if err := pem.Encode(privateKeyFile, privateKeyPEM); err != nil {
+	if err := pemEncode(privateKeyFile, privateKeyPEM); err != nil {
 		return err
 	}
 
-	publicKey, err := ssh.NewPublicKey(&privateKey.PublicKey)
+	publicKey, err := sshNewPublicKey(&privateKey.PublicKey)
 	if err != nil {
 		return err
 	}
 
 	pubKeyPath := keyPath + ".pub"
-	pubKeyFile, err := os.OpenFile(pubKeyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	pubKeyFile, err := osOpenFile(pubKeyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
 	}
-	defer pubKeyFile.Close()
+	defer func(pubKeyFile *os.File) {
+		errGroup = append(errGroup, pubKeyFile.Close())
+	}(pubKeyFile)
 
-	_, err = pubKeyFile.Write(ssh.MarshalAuthorizedKey(publicKey))
+	_, err = pubKeyWrite(pubKeyFile, ssh.MarshalAuthorizedKey(publicKey))
 	if err != nil {
 		return err
 	}
 
 	log.Printf("SSH key pair generated successfully at %s and %s", keyPath, pubKeyPath)
-	return nil
+	return errors.Join(errGroup...)
 }

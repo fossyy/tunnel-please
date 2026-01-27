@@ -3,6 +3,7 @@ package interaction
 import (
 	"fmt"
 	"time"
+	"tunnel_pls/internal/random"
 	"tunnel_pls/types"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -22,6 +23,7 @@ func (i commandItem) Title() string       { return i.name }
 func (i commandItem) Description() string { return i.desc }
 
 type model struct {
+	randomizer        random.Random
 	domain            string
 	protocol          string
 	tunnelType        types.TunnelType
@@ -39,6 +41,25 @@ type model struct {
 	width             int
 	height            int
 }
+
+const (
+	ColorPrimary   = "#7D56F4"
+	ColorSecondary = "#04B575"
+	ColorGray      = "#888888"
+	ColorDarkGray  = "#666666"
+	ColorWhite     = "#FAFAFA"
+	ColorError     = "#FF0000"
+	ColorErrorBg   = "#3D0000"
+	ColorWarning   = "#FFA500"
+	ColorWarningBg = "#3D2000"
+)
+
+const (
+	BreakpointTiny   = 50
+	BreakpointSmall  = 60
+	BreakpointMedium = 70
+	BreakpointLarge  = 85
+)
 
 func (m *model) getTunnelURL() string {
 	if m.tunnelType == types.TunnelTypeHTTP {

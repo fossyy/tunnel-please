@@ -94,12 +94,13 @@ func (r *registry) Update(user string, oldKey, newKey Key) error {
 		return ErrInvalidSlug
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if _, exists := r.slugIndex[newKey]; exists && newKey != oldKey {
 		return ErrSlugInUse
 	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	client, ok := r.byUser[user][oldKey]
 	if !ok {
 		return ErrSessionNotFound
@@ -111,9 +112,6 @@ func (r *registry) Update(user string, oldKey, newKey Key) error {
 	client.Slug().Set(newKey.Id)
 	r.slugIndex[newKey] = user
 
-	if r.byUser[user] == nil {
-		r.byUser[user] = make(map[Key]Session)
-	}
 	r.byUser[user][newKey] = client
 	return nil
 }

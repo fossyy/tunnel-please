@@ -7,6 +7,7 @@ type SessionStatus int
 const (
 	SessionStatusINITIALIZING SessionStatus = iota
 	SessionStatusRUNNING
+	SessionStatusCLOSED
 )
 
 type InteractiveMode int

@@ -3,7 +3,9 @@ package interaction
 import (
 	"context"
 	"log"
+	"sync"
 	"tunnel_pls/internal/config"
+	"tunnel_pls/internal/random"
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
 
@@ -39,6 +41,7 @@ type Forwarder interface {
 
 type CloseFunc func() error
 type interaction struct {
+	randomizer      random.Random
 	config          config.Config
 	channel         ssh.Channel
 	slug            slug.Slug
@@ -50,6 +53,7 @@ type interaction struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	mode            types.InteractiveMode
+	programMu       sync.Mutex
 }
 
 func (i *interaction) SetMode(m types.InteractiveMode) {
@@ -76,9 +80,10 @@ func (i *interaction) SetWH(w, h int) {
 	}
 }
 
-func New(config config.Config, slug slug.Slug, forwarder Forwarder, sessionRegistry SessionRegistry, user string, closeFunc CloseFunc) Interaction {
+func New(randomizer random.Random, config config.Config, slug slug.Slug, forwarder Forwarder, sessionRegistry SessionRegistry, user string, closeFunc CloseFunc) Interaction {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &interaction{
+		randomizer:      randomizer,
 		config:          config,
 		channel:         nil,
 		slug:            slug,
@@ -100,6 +105,10 @@ func (i *interaction) Stop() {
 	if i.cancel != nil {
 		i.cancel()
 	}
+
+	i.programMu.Lock()
+	defer i.programMu.Unlock()
+
 	if i.program != nil {
 		i.program.Kill()
 		i.program = nil
@@ -210,6 +219,7 @@ func (i *interaction) Start() {
 	ti.Width = 50
 
 	m := &model{
+		randomizer:  i.randomizer,
 		domain:      i.config.Domain(),
 		protocol:    protocol,
 		tunnelType:  tunnelType,
@@ -234,6 +244,7 @@ func (i *interaction) Start() {
 		help: help.New(),
 	}
 
+	i.programMu.Lock()
 	i.program = tea.NewProgram(
 		m,
 		tea.WithInput(i.channel),
@@ -244,16 +255,21 @@ func (i *interaction) Start() {
 		tea.WithoutSignalHandler(),
 		tea.WithFPS(30),
 	)
+	i.programMu.Unlock()
 
 	_, err := i.program.Run()
 	if err != nil {
 		log.Printf("Cannot close tea: %s \n", err)
 	}
-	i.program.Kill()
-	i.program = nil
+
+	i.programMu.Lock()
+	if i.program != nil {
+		i.program.Kill()
+		i.program = nil
+	}
+	i.programMu.Unlock()
+
 	if i.closeFunc != nil {
-		if err := i.closeFunc(); err != nil {
-			log.Printf("Cannot close session: %s \n", err)
-		}
+		_ = i.closeFunc()
 	}
 }

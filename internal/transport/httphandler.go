@@ -1,7 +1,8 @@
 package transport
 
 import (
-	"bufio"
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/http/header"
 	"tunnel_pls/internal/http/stream"
 	"tunnel_pls/internal/middleware"
@@ -20,16 +22,14 @@ import (
 )
 
 type httpHandler struct {
-	domain          string
+	config          config.Config
 	sessionRegistry registry.Registry
-	redirectTLS     bool
 }
 
-func newHTTPHandler(domain string, sessionRegistry registry.Registry, redirectTLS bool) *httpHandler {
+func newHTTPHandler(config config.Config, sessionRegistry registry.Registry) *httpHandler {
 	return &httpHandler{
-		domain:          domain,
+		config:          config,
 		sessionRegistry: sessionRegistry,
-		redirectTLS:     redirectTLS,
 	}
 }
 
@@ -52,13 +52,28 @@ func (hh *httpHandler) badRequest(conn net.Conn) error {
 	return nil
 }
 
-func (hh *httpHandler) handler(conn net.Conn, isTLS bool) {
+func (hh *httpHandler) Handler(conn net.Conn, isTLS bool) {
 	defer hh.closeConnection(conn)
 
-	dstReader := bufio.NewReader(conn)
-	reqhf, err := header.NewRequest(dstReader)
+	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	buf := make([]byte, hh.config.HeaderSize())
+	n, err := conn.Read(buf)
+	if err != nil {
+		_ = hh.badRequest(conn)
+		return
+	}
+
+	if idx := bytes.Index(buf[:n], []byte("\r\n\r\n")); idx == -1 {
+		_ = hh.badRequest(conn)
+		return
+	}
+
+	_ = conn.SetReadDeadline(time.Time{})
+
+	reqhf, err := header.NewRequest(buf[:n])
 	if err != nil {
 		log.Printf("Error creating request header: %v", err)
+		_ = hh.badRequest(conn)
 		return
 	}
 
@@ -69,7 +84,7 @@ func (hh *httpHandler) handler(conn net.Conn, isTLS bool) {
 	}
 
 	if hh.shouldRedirectToTLS(isTLS) {
-		_ = hh.redirect(conn, http.StatusMovedPermanently, fmt.Sprintf("Location: https://%s.%s/\r\n", slug, hh.domain))
+		_ = hh.redirect(conn, http.StatusMovedPermanently, fmt.Sprintf("https://%s.%s/\r\n", slug, hh.config.Domain()))
 		return
 	}
 
@@ -77,13 +92,16 @@ func (hh *httpHandler) handler(conn net.Conn, isTLS bool) {
 		return
 	}
 
-	sshSession, err := hh.getSession(slug)
+	sshSession, err := hh.sessionRegistry.Get(types.SessionKey{
+		Id:   slug,
+		Type: types.TunnelTypeHTTP,
+	})
 	if err != nil {
 		_ = hh.redirect(conn, http.StatusMovedPermanently, fmt.Sprintf("https://tunnl.live/tunnel-not-found?slug=%s\r\n", slug))
 		return
 	}
 
-	hw := stream.New(conn, dstReader, conn.RemoteAddr())
+	hw := stream.New(conn, conn, conn.RemoteAddr())
 	defer func(hw stream.HTTP) {
 		err = hw.Close()
 		if err != nil {
@@ -102,14 +120,14 @@ func (hh *httpHandler) closeConnection(conn net.Conn) {
 
 func (hh *httpHandler) extractSlug(reqhf header.RequestHeader) (string, error) {
 	host := strings.Split(reqhf.Value("Host"), ".")
-	if len(host) < 1 {
+	if len(host) <= 1 {
 		return "", errors.New("invalid host")
 	}
 	return host[0], nil
 }
 
 func (hh *httpHandler) shouldRedirectToTLS(isTLS bool) bool {
-	return !isTLS && hh.redirectTLS
+	return !isTLS && hh.config.TLSRedirect()
 }
 
 func (hh *httpHandler) handlePingRequest(slug string, conn net.Conn) bool {
@@ -128,28 +146,21 @@ func (hh *httpHandler) handlePingRequest(slug string, conn net.Conn) bool {
 	))
 	if err != nil {
 		log.Println("Failed to write 200 OK:", err)
+		return true
 	}
 	return true
 }
 
-func (hh *httpHandler) getSession(slug string) (registry.Session, error) {
-	sshSession, err := hh.sessionRegistry.Get(types.SessionKey{
-		Id:   slug,
-		Type: types.TunnelTypeHTTP,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return sshSession, nil
-}
-
 func (hh *httpHandler) forwardRequest(hw stream.HTTP, initialRequest header.RequestHeader, sshSession registry.Session) {
-	channel, err := hh.openForwardedChannel(hw, sshSession)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	channel, reqs, err := sshSession.Forwarder().OpenForwardedChannel(ctx, hw.RemoteAddr())
 	if err != nil {
-		log.Printf("Failed to establish channel: %v", err)
-		sshSession.Forwarder().WriteBadGatewayResponse(hw)
+		log.Printf("Failed to open forwarded-tcpip channel: %v", err)
 		return
 	}
+
+	go ssh.DiscardRequests(reqs)
 
 	defer func() {
 		err = channel.Close()
@@ -165,47 +176,6 @@ func (hh *httpHandler) forwardRequest(hw stream.HTTP, initialRequest header.Requ
 		return
 	}
 	sshSession.Forwarder().HandleConnection(hw, channel)
-}
-
-func (hh *httpHandler) openForwardedChannel(hw stream.HTTP, sshSession registry.Session) (ssh.Channel, error) {
-	payload := sshSession.Forwarder().CreateForwardedTCPIPPayload(hw.RemoteAddr())
-
-	type channelResult struct {
-		channel ssh.Channel
-		reqs    <-chan *ssh.Request
-		err     error
-	}
-
-	resultChan := make(chan channelResult, 1)
-
-	go func() {
-		channel, reqs, err := sshSession.Lifecycle().Connection().OpenChannel("forwarded-tcpip", payload)
-		select {
-		case resultChan <- channelResult{channel, reqs, err}:
-		default:
-			hh.cleanupUnusedChannel(channel, reqs)
-		}
-	}()
-
-	select {
-	case result := <-resultChan:
-		if result.err != nil {
-			return nil, result.err
-		}
-		go ssh.DiscardRequests(result.reqs)
-		return result.channel, nil
-	case <-time.After(5 * time.Second):
-		return nil, errors.New("timeout opening forwarded-tcpip channel")
-	}
-}
-
-func (hh *httpHandler) cleanupUnusedChannel(channel ssh.Channel, reqs <-chan *ssh.Request) {
-	if channel != nil {
-		if err := channel.Close(); err != nil {
-			log.Printf("Failed to close unused channel: %v", err)
-		}
-		go ssh.DiscardRequests(reqs)
-	}
 }
 
 func (hh *httpHandler) setupMiddlewares(hw stream.HTTP) {

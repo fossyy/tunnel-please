@@ -18,18 +18,21 @@ type config struct {
 	httpPort  string
 	httpsPort string
 
-	tlsEnabled  bool
-	tlsRedirect bool
+	keyLoc string
 
-	acmeEmail   string
-	cfAPIToken  string
-	acmeStaging bool
+	tlsEnabled     bool
+	tlsRedirect    bool
+	tlsStoragePath string
+	acmeEmail      string
+	cfAPIToken     string
+	acmeStaging    bool
 
 	allowedPortsStart uint16
 	allowedPortsEnd   uint16
 
 	bufferSize int
-
+	headerSize int
+	
 	pprofEnabled bool
 	pprofPort    string
 
@@ -51,8 +54,11 @@ func parse() (*config, error) {
 	httpPort := getenv("HTTP_PORT", "8080")
 	httpsPort := getenv("HTTPS_PORT", "8443")
 
+	keyLoc := getenv("KEY_LOC", "certs/privkey.pem")
+
 	tlsEnabled := getenvBool("TLS_ENABLED", false)
 	tlsRedirect := tlsEnabled && getenvBool("TLS_REDIRECT", false)
+	tlsStoragePath := getenv("TLS_STORAGE_PATH", "certs/tls/")
 
 	acmeEmail := getenv("ACME_EMAIL", "admin@"+domain)
 	acmeStaging := getenvBool("ACME_STAGING", false)
@@ -68,6 +74,7 @@ func parse() (*config, error) {
 	}
 
 	bufferSize := parseBufferSize()
+	headerSize := parseHeaderSize()
 
 	pprofEnabled := getenvBool("PPROF_ENABLED", false)
 	pprofPort := getenv("PPROF_PORT", "6060")
@@ -85,14 +92,17 @@ func parse() (*config, error) {
 		sshPort:           sshPort,
 		httpPort:          httpPort,
 		httpsPort:         httpsPort,
+		keyLoc:            keyLoc,
 		tlsEnabled:        tlsEnabled,
 		tlsRedirect:       tlsRedirect,
+		tlsStoragePath:    tlsStoragePath,
 		acmeEmail:         acmeEmail,
 		cfAPIToken:        cfToken,
 		acmeStaging:       acmeStaging,
 		allowedPortsStart: start,
 		allowedPortsEnd:   end,
 		bufferSize:        bufferSize,
+		headerSize:        headerSize,
 		pprofEnabled:      pprofEnabled,
 		pprofPort:         pprofPort,
 		mode:              mode,
@@ -148,6 +158,16 @@ func parseBufferSize() int {
 	raw := getenv("BUFFER_SIZE", "32768")
 	size, err := strconv.Atoi(raw)
 	if err != nil || size < 4096 || size > 1048576 {
+		log.Println("Invalid BUFFER_SIZE, falling back to 4096")
+		return 4096
+	}
+	return size
+}
+
+func parseHeaderSize() int {
+	raw := getenv("MAX_HEADER_SIZE", "4096")
+	size, err := strconv.Atoi(raw)
+	if err != nil || size < 4096 || size > 131072 {
 		log.Println("Invalid BUFFER_SIZE, falling back to 4096")
 		return 4096
 	}
