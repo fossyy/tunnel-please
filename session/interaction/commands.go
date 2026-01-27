@@ -10,34 +10,37 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+func (m *model) handleCommandSelection(item commandItem) (tea.Model, tea.Cmd) {
+	switch item.name {
+	case "slug":
+		m.showingCommands = false
+		m.editingSlug = true
+		m.slugInput.SetValue(m.interaction.slug.String())
+		m.slugInput.Focus()
+		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
+	case "tunnel-type":
+		m.showingCommands = false
+		m.showingComingSoon = true
+		return m, tea.Batch(tickCmd(5*time.Second), tea.ClearScreen, textinput.Blink)
+	default:
+		m.showingCommands = false
+		return m, nil
+	}
+}
+
 func (m *model) commandsUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch {
-	case key.Matches(msg, m.keymap.quit):
+	case key.Matches(msg, m.keymap.quit), msg.String() == "esc":
 		m.showingCommands = false
 		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
 	case msg.String() == "enter":
 		selectedItem := m.commandList.SelectedItem()
 		if selectedItem != nil {
 			item := selectedItem.(commandItem)
-			if item.name == "slug" {
-				m.showingCommands = false
-				m.editingSlug = true
-				m.slugInput.SetValue(m.interaction.slug.String())
-				m.slugInput.Focus()
-				return m, tea.Batch(tea.ClearScreen, textinput.Blink)
-			} else if item.name == "tunnel-type" {
-				m.showingCommands = false
-				m.showingComingSoon = true
-				return m, tea.Batch(tickCmd(5*time.Second), tea.ClearScreen, textinput.Blink)
-			}
-			m.showingCommands = false
-			return m, nil
+			return m.handleCommandSelection(item)
 		}
-	case msg.String() == "esc":
-		m.showingCommands = false
-		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
 	}
 	m.commandList, cmd = m.commandList.Update(msg)
 	return m, cmd

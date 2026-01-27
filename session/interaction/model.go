@@ -42,6 +42,25 @@ type model struct {
 	height            int
 }
 
+const (
+	ColorPrimary   = "#7D56F4"
+	ColorSecondary = "#04B575"
+	ColorGray      = "#888888"
+	ColorDarkGray  = "#666666"
+	ColorWhite     = "#FAFAFA"
+	ColorError     = "#FF0000"
+	ColorErrorBg   = "#3D0000"
+	ColorWarning   = "#FFA500"
+	ColorWarningBg = "#3D2000"
+)
+
+const (
+	BreakpointTiny   = 50
+	BreakpointSmall  = 60
+	BreakpointMedium = 70
+	BreakpointLarge  = 85
+)
+
 func (m *model) getTunnelURL() string {
 	if m.tunnelType == types.TunnelTypeHTTP {
 		return buildURL(m.protocol, m.interaction.slug.String(), m.domain)
