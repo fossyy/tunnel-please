@@ -22,7 +22,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux \
     go build -trimpath \
-    -ldflags="-w -s -X tunnel_pls/version.Version=${VERSION} -X tunnel_pls/version.BuildDate=${BUILD_DATE} -X tunnel_pls/version.Commit=${COMMIT}" \
+    -ldflags="-w -s \
+    	-X tunnel_pls/internal/version.Version=${VERSION} \
+    	-X tunnel_pls/internal/version.BuildDate=${BUILD_DATE} \
+    	-X tunnel_pls/internal/version.Commit=${COMMIT}" \
     -o /app/tunnel_pls \
     .
 
