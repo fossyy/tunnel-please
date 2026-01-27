@@ -9,8 +9,11 @@ type Config interface {
 	HTTPPort() string
 	HTTPSPort() string
 
+	KeyLoc() string
+
 	TLSEnabled() bool
 	TLSRedirect() bool
+	TLSStoragePath() string
 
 	ACMEEmail() string
 	CFAPIToken() string
@@ -20,6 +23,7 @@ type Config interface {
 	AllowedPortsEnd() uint16
 
 	BufferSize() int
+	HeaderSize() int
 
 	PprofEnabled() bool
 	PprofPort() string
@@ -47,14 +51,17 @@ func (c *config) Domain() string            { return c.domain }
 func (c *config) SSHPort() string           { return c.sshPort }
 func (c *config) HTTPPort() string          { return c.httpPort }
 func (c *config) HTTPSPort() string         { return c.httpsPort }
+func (c *config) KeyLoc() string            { return c.keyLoc }
 func (c *config) TLSEnabled() bool          { return c.tlsEnabled }
 func (c *config) TLSRedirect() bool         { return c.tlsRedirect }
+func (c *config) TLSStoragePath() string    { return c.tlsStoragePath }
 func (c *config) ACMEEmail() string         { return c.acmeEmail }
 func (c *config) CFAPIToken() string        { return c.cfAPIToken }
 func (c *config) ACMEStaging() bool         { return c.acmeStaging }
 func (c *config) AllowedPortsStart() uint16 { return c.allowedPortsStart }
 func (c *config) AllowedPortsEnd() uint16   { return c.allowedPortsEnd }
 func (c *config) BufferSize() int           { return c.bufferSize }
+func (c *config) HeaderSize() int           { return c.headerSize }
 func (c *config) PprofEnabled() bool        { return c.pprofEnabled }
 func (c *config) PprofPort() string         { return c.pprofPort }
 func (c *config) Mode() types.ServerMode    { return c.mode }

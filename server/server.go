@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"time"
 	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/grpc/client"
 	"tunnel_pls/internal/port"
+	"tunnel_pls/internal/random"
 	"tunnel_pls/internal/registry"
 	"tunnel_pls/session"
 
@@ -21,6 +23,7 @@ type Server interface {
 	Close() error
 }
 type server struct {
+	randomizer      random.Random
 	config          config.Config
 	sshPort         string
 	sshListener     net.Listener
@@ -30,13 +33,14 @@ type server struct {
 	portRegistry    port.Port
 }
 
-func New(config config.Config, sshConfig *ssh.ServerConfig, sessionRegistry registry.Registry, grpcClient client.Client, portRegistry port.Port, sshPort string) (Server, error) {
+func New(randomizer random.Random, config config.Config, sshConfig *ssh.ServerConfig, sessionRegistry registry.Registry, grpcClient client.Client, portRegistry port.Port, sshPort string) (Server, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", sshPort))
 	if err != nil {
 		return nil, err
 	}
 
 	return &server{
+		randomizer:      randomizer,
 		config:          config,
 		sshPort:         sshPort,
 		sshListener:     listener,
@@ -82,7 +86,7 @@ func (s *server) handleConnection(conn net.Conn) {
 
 	defer func(sshConn *ssh.ServerConn) {
 		err = sshConn.Close()
-		if err != nil && !errors.Is(err, net.ErrClosed) {
+		if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
 			log.Printf("failed to close SSH server: %v", err)
 		}
 	}(sshConn)
@@ -95,11 +99,19 @@ func (s *server) handleConnection(conn net.Conn) {
 		cancel()
 	}
 	log.Println("SSH connection established:", sshConn.User())
-	sshSession := session.New(s.config, sshConn, forwardingReqs, chans, s.sessionRegistry, s.portRegistry, user)
+	sshSession := session.New(&session.Config{
+		Randomizer:      s.randomizer,
+		Config:          s.config,
+		Conn:            sshConn,
+		InitialReq:      forwardingReqs,
+		SshChan:         chans,
+		SessionRegistry: s.sessionRegistry,
+		PortRegistry:    s.portRegistry,
+		User:            user,
+	})
 	err = sshSession.Start()
 	if err != nil {
-		log.Printf("SSH session ended with error: %v", err)
+		log.Printf("SSH session ended with error: %s", err.Error())
 		return
 	}
-	return
 }

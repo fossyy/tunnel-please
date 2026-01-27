@@ -30,7 +30,6 @@ type http struct {
 	remoteAddr net.Addr
 	writer     io.Writer
 	reader     io.Reader
-	headerBuf  []byte
 	buf        []byte
 	respHeader header.ResponseHeader
 	reqHeader  header.RequestHeader
@@ -72,7 +71,10 @@ func (hs *http) ResponseMiddlewares() []middleware.ResponseMiddleware {
 }
 
 func (hs *http) Close() error {
-	return hs.writer.(io.Closer).Close()
+	if closer, ok := hs.writer.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
 }
 
 func (hs *http) CloseWrite() error {

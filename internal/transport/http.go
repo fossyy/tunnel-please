@@ -4,27 +4,28 @@ import (
 	"errors"
 	"log"
 	"net"
+	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/registry"
 )
 
 type httpServer struct {
 	handler *httpHandler
-	port    string
+	config  config.Config
 }
 
-func NewHTTPServer(domain, port string, sessionRegistry registry.Registry, redirectTLS bool) Transport {
+func NewHTTPServer(config config.Config, sessionRegistry registry.Registry) Transport {
 	return &httpServer{
-		handler: newHTTPHandler(domain, sessionRegistry, redirectTLS),
-		port:    port,
+		handler: newHTTPHandler(config, sessionRegistry),
+		config:  config,
 	}
 }
 
 func (ht *httpServer) Listen() (net.Listener, error) {
-	return net.Listen("tcp", ":"+ht.port)
+	return net.Listen("tcp", ":"+ht.config.HTTPPort())
 }
 
 func (ht *httpServer) Serve(listener net.Listener) error {
-	log.Printf("HTTP server is starting on port %s", ht.port)
+	log.Printf("HTTP server is starting on port %s", ht.config.HTTPPort())
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -35,6 +36,6 @@ func (ht *httpServer) Serve(listener net.Listener) error {
 			continue
 		}
 
-		go ht.handler.handler(conn, false)
+		go ht.handler.Handler(conn, false)
 	}
 }

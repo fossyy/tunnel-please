@@ -1,8 +1,7 @@
 package forwarder
 
 import (
-	"bytes"
-	"encoding/binary"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,7 +9,6 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"time"
 	"tunnel_pls/internal/config"
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
@@ -26,9 +24,7 @@ type Forwarder interface {
 	TunnelType() types.TunnelType
 	ForwardedPort() uint16
 	HandleConnection(dst io.ReadWriter, src ssh.Channel)
-	CreateForwardedTCPIPPayload(origin net.Addr) []byte
-	OpenForwardedChannel(payload []byte) (ssh.Channel, <-chan *ssh.Request, error)
-	WriteBadGatewayResponse(dst io.Writer)
+	OpenForwardedChannel(ctx context.Context, origin net.Addr) (ssh.Channel, <-chan *ssh.Request, error)
 	Close() error
 }
 type forwarder struct {
@@ -50,19 +46,21 @@ func New(config config.Config, slug slug.Slug, conn ssh.Conn) Forwarder {
 		bufferPool: sync.Pool{
 			New: func() interface{} {
 				bufSize := config.BufferSize()
-				return make([]byte, bufSize)
+				buf := make([]byte, bufSize)
+				return &buf
 			},
 		},
 	}
 }
 
 func (f *forwarder) copyWithBuffer(dst io.Writer, src io.Reader) (written int64, err error) {
-	buf := f.bufferPool.Get().([]byte)
+	buf := f.bufferPool.Get().(*[]byte)
 	defer f.bufferPool.Put(buf)
-	return io.CopyBuffer(dst, src, buf)
+	return io.CopyBuffer(dst, src, *buf)
 }
 
-func (f *forwarder) OpenForwardedChannel(payload []byte) (ssh.Channel, <-chan *ssh.Request, error) {
+func (f *forwarder) OpenForwardedChannel(ctx context.Context, origin net.Addr) (ssh.Channel, <-chan *ssh.Request, error) {
+	payload := createForwardedTCPIPPayload(origin, f.forwardedPort)
 	type channelResult struct {
 		channel ssh.Channel
 		reqs    <-chan *ssh.Request
@@ -74,13 +72,9 @@ func (f *forwarder) OpenForwardedChannel(payload []byte) (ssh.Channel, <-chan *s
 		channel, reqs, err := f.conn.OpenChannel("forwarded-tcpip", payload)
 		select {
 		case resultChan <- channelResult{channel, reqs, err}:
-		default:
+		case <-ctx.Done():
 			if channel != nil {
-				err = channel.Close()
-				if err != nil {
-					log.Printf("Failed to close unused channel: %v", err)
-					return
-				}
+				_ = channel.Close()
 				go ssh.DiscardRequests(reqs)
 			}
 		}
@@ -89,8 +83,8 @@ func (f *forwarder) OpenForwardedChannel(payload []byte) (ssh.Channel, <-chan *s
 	select {
 	case result := <-resultChan:
 		return result.channel, result.reqs, result.err
-	case <-time.After(5 * time.Second):
-		return nil, nil, errors.New("timeout opening forwarded-tcpip channel")
+	case <-ctx.Done():
+		return nil, nil, fmt.Errorf("context cancelled: %w", ctx.Err())
 	}
 }
 
@@ -119,10 +113,7 @@ func (f *forwarder) copyAndClose(dst io.Writer, src io.Reader, direction string)
 
 func (f *forwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel) {
 	defer func() {
-		_, err := io.Copy(io.Discard, src)
-		if err != nil {
-			log.Printf("Failed to discard connection: %v", err)
-		}
+		_, _ = io.Copy(io.Discard, src)
 	}()
 
 	var wg sync.WaitGroup
@@ -173,14 +164,6 @@ func (f *forwarder) Listener() net.Listener {
 	return f.listener
 }
 
-func (f *forwarder) WriteBadGatewayResponse(dst io.Writer) {
-	_, err := dst.Write(types.BadGatewayResponse)
-	if err != nil {
-		log.Printf("failed to write Bad Gateway response: %v", err)
-		return
-	}
-}
-
 func (f *forwarder) Close() error {
 	if f.Listener() != nil {
 		return f.listener.Close()
@@ -188,43 +171,21 @@ func (f *forwarder) Close() error {
 	return nil
 }
 
-func (f *forwarder) CreateForwardedTCPIPPayload(origin net.Addr) []byte {
-	var buf bytes.Buffer
-
-	host, originPort := parseAddr(origin.String())
-
-	writeSSHString(&buf, "localhost")
-	err := binary.Write(&buf, binary.BigEndian, uint32(f.ForwardedPort()))
-	if err != nil {
-		log.Printf("Failed to write string to buffer: %v", err)
-		return nil
-	}
-
-	writeSSHString(&buf, host)
-	err = binary.Write(&buf, binary.BigEndian, uint32(originPort))
-	if err != nil {
-		log.Printf("Failed to write string to buffer: %v", err)
-		return nil
-	}
-
-	return buf.Bytes()
-}
-
-func parseAddr(addr string) (string, uint16) {
-	host, portStr, err := net.SplitHostPort(addr)
-	if err != nil {
-		log.Printf("Failed to parse origin address: %s from address %s", err.Error(), addr)
-		return "0.0.0.0", uint16(0)
-	}
+func createForwardedTCPIPPayload(origin net.Addr, destPort uint16) []byte {
+	host, portStr, _ := net.SplitHostPort(origin.String())
 	port, _ := strconv.Atoi(portStr)
-	return host, uint16(port)
-}
 
-func writeSSHString(buffer *bytes.Buffer, str string) {
-	err := binary.Write(buffer, binary.BigEndian, uint32(len(str)))
-	if err != nil {
-		log.Printf("Failed to write string to buffer: %v", err)
-		return
+	forwardPayload := struct {
+		DestAddr   string
+		DestPort   uint32
+		OriginAddr string
+		OriginPort uint32
+	}{
+		DestAddr:   "localhost",
+		DestPort:   uint32(destPort),
+		OriginAddr: host,
+		OriginPort: uint32(port),
 	}
-	buffer.WriteString(str)
+
+	return ssh.Marshal(forwardPayload)
 }
