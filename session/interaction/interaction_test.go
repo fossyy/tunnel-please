@@ -9,10 +9,10 @@ import (
 	"time"
 	"tunnel_pls/types"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"golang.org/x/crypto/ssh"
@@ -459,7 +459,7 @@ func TestInteraction_Start(t *testing.T) {
 			mockInteraction := New(mockRandom, mockConfig, mockSlug, mockForwarder, mockSessionRegistry, "user", mockCloser.Close)
 			mockInteraction.SetMode(tt.mode)
 
-			mockConfig.On("Domain").Return("tunnl.live")
+			mockConfig.On("Domain").Return("tunel.live")
 			mockConfig.On("TLSEnabled").Return(tt.tlsEnabled)
 			mockForwarder.On("TunnelType").Return(tt.tunnelType)
 			mockForwarder.On("ForwardedPort").Return(tt.port)
@@ -525,7 +525,7 @@ func TestModel_Update(t *testing.T) {
 
 			m := &model{
 				randomizer:        mockRandom,
-				domain:            "tunnl.live",
+				domain:            "tunel.live",
 				protocol:          "http",
 				tunnelType:        types.TunnelTypeHTTP,
 				port:              8080,
@@ -622,7 +622,7 @@ func TestModel_View(t *testing.T) {
 
 			m := &model{
 				randomizer:        mockRandom,
-				domain:            "tunnl.live",
+				domain:            "tunel.live",
 				protocol:          "http",
 				tunnelType:        types.TunnelTypeHTTP,
 				port:              8080,
@@ -651,9 +651,9 @@ func TestModel_View(t *testing.T) {
 			view := m.View()
 
 			if tt.expectedEmpty {
-				assert.Empty(t, view)
+				assert.Empty(t, view.Content)
 			} else {
-				assert.NotEmpty(t, view)
+				assert.NotEmpty(t, view.Content)
 			}
 		})
 	}
@@ -694,7 +694,7 @@ func TestInteraction_Integration(t *testing.T) {
 func TestModel_Update_KeyMessages(t *testing.T) {
 	tests := []struct {
 		name              string
-		key               tea.KeyMsg
+		key               tea.KeyPressMsg
 		showingComingSoon bool
 		editingSlug       bool
 		showingCommands   bool
@@ -702,25 +702,25 @@ func TestModel_Update_KeyMessages(t *testing.T) {
 	}{
 		{
 			name:              "key press while showing coming soon",
-			key:               tea.KeyMsg{Type: tea.KeyEnter},
+			key:               tea.KeyPressMsg{Code: tea.KeyEnter},
 			showingComingSoon: true,
 			description:       "should call comingSoonUpdate",
 		},
 		{
 			name:        "key press while editing slug",
-			key:         tea.KeyMsg{Type: tea.KeyEnter},
+			key:         tea.KeyPressMsg{Code: tea.KeyEnter},
 			editingSlug: true,
 			description: "should call slugUpdate",
 		},
 		{
 			name:            "key press while showing commands",
-			key:             tea.KeyMsg{Type: tea.KeyEnter},
+			key:             tea.KeyPressMsg{Code: tea.KeyEnter},
 			showingCommands: true,
 			description:     "should call commandsUpdate",
 		},
 		{
 			name:        "key press in dashboard view",
-			key:         tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}},
+			key:         tea.KeyPressMsg{Code: 'c', Text: "c"},
 			description: "should call dashboardUpdate",
 		},
 	}
@@ -742,7 +742,7 @@ func TestModel_Update_KeyMessages(t *testing.T) {
 
 			m := &model{
 				randomizer:        mockRandom,
-				domain:            "tunnl.live",
+				domain:            "tunel.live",
 				protocol:          "http",
 				tunnelType:        types.TunnelTypeHTTP,
 				port:              8080,
@@ -777,7 +777,7 @@ func TestModel_SlugUpdate(t *testing.T) {
 	tests := []struct {
 		name           string
 		tunnelType     types.TunnelType
-		keyMsg         tea.KeyMsg
+		keyMsg         tea.KeyPressMsg
 		inputValue     string
 		setupMocks     func(*MockSessionRegistry, *MockSlug, *MockRandom)
 		expectedEdit   bool
@@ -787,21 +787,21 @@ func TestModel_SlugUpdate(t *testing.T) {
 		{
 			name:         "escape key cancels editing",
 			tunnelType:   types.TunnelTypeHTTP,
-			keyMsg:       tea.KeyMsg{Type: tea.KeyEsc},
+			keyMsg:       tea.KeyPressMsg{Code: tea.KeyEsc},
 			setupMocks:   func(msr *MockSessionRegistry, ms *MockSlug, mr *MockRandom) {},
 			expectedEdit: false,
 		},
 		{
 			name:         "ctrl+c cancels editing",
 			tunnelType:   types.TunnelTypeHTTP,
-			keyMsg:       tea.KeyMsg{Type: tea.KeyCtrlC},
+			keyMsg:       tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl},
 			setupMocks:   func(msr *MockSessionRegistry, ms *MockSlug, mr *MockRandom) {},
 			expectedEdit: false,
 		},
 		{
 			name:       "enter key saves valid slug",
 			tunnelType: types.TunnelTypeHTTP,
-			keyMsg:     tea.KeyMsg{Type: tea.KeyEnter},
+			keyMsg:     tea.KeyPressMsg{Code: tea.KeyEnter},
 			inputValue: "my-custom-slug",
 			setupMocks: func(msr *MockSessionRegistry, ms *MockSlug, mr *MockRandom) {
 				ms.On("String").Return("old-slug")
@@ -816,7 +816,7 @@ func TestModel_SlugUpdate(t *testing.T) {
 		{
 			name:       "enter key with error shows error message",
 			tunnelType: types.TunnelTypeHTTP,
-			keyMsg:     tea.KeyMsg{Type: tea.KeyEnter},
+			keyMsg:     tea.KeyPressMsg{Code: tea.KeyEnter},
 			inputValue: "invalid",
 			setupMocks: func(msr *MockSessionRegistry, ms *MockSlug, mr *MockRandom) {
 				ms.On("String").Return("old-slug")
@@ -831,7 +831,7 @@ func TestModel_SlugUpdate(t *testing.T) {
 		{
 			name:       "ctrl+r generates random slug",
 			tunnelType: types.TunnelTypeHTTP,
-			keyMsg:     tea.KeyMsg{Type: tea.KeyCtrlR},
+			keyMsg:     tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl},
 			setupMocks: func(msr *MockSessionRegistry, ms *MockSlug, mr *MockRandom) {
 				mr.On("String", 20).Return("random-generated-slug", nil)
 			},
@@ -841,7 +841,7 @@ func TestModel_SlugUpdate(t *testing.T) {
 		{
 			name:       "ctrl+r with error does nothing",
 			tunnelType: types.TunnelTypeHTTP,
-			keyMsg:     tea.KeyMsg{Type: tea.KeyCtrlR},
+			keyMsg:     tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl},
 			setupMocks: func(msr *MockSessionRegistry, ms *MockSlug, mr *MockRandom) {
 				mr.On("String", 20).Return("", assert.AnError)
 			},
@@ -850,14 +850,14 @@ func TestModel_SlugUpdate(t *testing.T) {
 		{
 			name:         "regular key updates input",
 			tunnelType:   types.TunnelTypeHTTP,
-			keyMsg:       tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}},
+			keyMsg:       tea.KeyPressMsg{Code: 'a', Text: "a"},
 			setupMocks:   func(msr *MockSessionRegistry, ms *MockSlug, mr *MockRandom) {},
 			expectedEdit: true,
 		},
 		{
 			name:         "tcp tunnel exits editing immediately",
 			tunnelType:   types.TunnelTypeTCP,
-			keyMsg:       tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}},
+			keyMsg:       tea.KeyPressMsg{Code: 'a', Text: "a"},
 			setupMocks:   func(msr *MockSessionRegistry, ms *MockSlug, mr *MockRandom) {},
 			expectedEdit: false,
 		},
@@ -879,7 +879,7 @@ func TestModel_SlugUpdate(t *testing.T) {
 
 			m := &model{
 				randomizer:  mockRandom,
-				domain:      "tunnl.live",
+				domain:      "tunel.live",
 				protocol:    "http",
 				tunnelType:  tt.tunnelType,
 				port:        8080,
@@ -986,7 +986,7 @@ func TestModel_SlugView(t *testing.T) {
 
 			m := &model{
 				randomizer:  mockRandom,
-				domain:      "tunnl.live",
+				domain:      "tunel.live",
 				protocol:    "http",
 				tunnelType:  tt.tunnelType,
 				port:        8080,
@@ -1006,19 +1006,19 @@ func TestModel_SlugView(t *testing.T) {
 func TestModel_ComingSoonUpdate(t *testing.T) {
 	tests := []struct {
 		name   string
-		keyMsg tea.KeyMsg
+		keyMsg tea.KeyPressMsg
 	}{
 		{
 			name:   "any key dismisses coming soon",
-			keyMsg: tea.KeyMsg{Type: tea.KeyEnter},
+			keyMsg: tea.KeyPressMsg{Code: tea.KeyEnter},
 		},
 		{
 			name:   "escape key dismisses",
-			keyMsg: tea.KeyMsg{Type: tea.KeyEsc},
+			keyMsg: tea.KeyPressMsg{Code: tea.KeyEsc},
 		},
 		{
 			name:   "space key dismisses",
-			keyMsg: tea.KeyMsg{Type: tea.KeySpace},
+			keyMsg: tea.KeyPressMsg{Code: tea.KeySpace},
 		},
 	}
 
@@ -1097,7 +1097,7 @@ func TestModel_ComingSoonView(t *testing.T) {
 func TestModel_CommandsUpdate(t *testing.T) {
 	tests := []struct {
 		name             string
-		keyMsg           tea.KeyMsg
+		keyMsg           tea.KeyPressMsg
 		selectedItem     list.Item
 		expectCommands   bool
 		expectEditSlug   bool
@@ -1105,31 +1105,31 @@ func TestModel_CommandsUpdate(t *testing.T) {
 	}{
 		{
 			name:           "escape key closes commands",
-			keyMsg:         tea.KeyMsg{Type: tea.KeyEsc},
+			keyMsg:         tea.KeyPressMsg{Code: tea.KeyEsc},
 			expectCommands: false,
 		},
 		{
 			name:           "q key closes commands",
-			keyMsg:         tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}},
+			keyMsg:         tea.KeyPressMsg{Code: 'q', Text: "q"},
 			expectCommands: false,
 		},
 		{
 			name:           "enter on slug command starts editing",
-			keyMsg:         tea.KeyMsg{Type: tea.KeyEnter},
+			keyMsg:         tea.KeyPressMsg{Code: tea.KeyEnter},
 			selectedItem:   commandItem{name: "slug", desc: "Set custom subdomain"},
 			expectCommands: false,
 			expectEditSlug: true,
 		},
 		{
 			name:             "enter on tunnel-type shows coming soon",
-			keyMsg:           tea.KeyMsg{Type: tea.KeyEnter},
+			keyMsg:           tea.KeyPressMsg{Code: tea.KeyEnter},
 			selectedItem:     commandItem{name: "tunnel-type", desc: "Change tunnel type"},
 			expectCommands:   false,
 			expectComingSoon: true,
 		},
 		{
 			name:           "arrow key navigates list",
-			keyMsg:         tea.KeyMsg{Type: tea.KeyDown},
+			keyMsg:         tea.KeyPressMsg{Code: tea.KeyDown},
 			expectCommands: true,
 		},
 	}
@@ -1261,28 +1261,28 @@ func TestModel_CommandsView(t *testing.T) {
 func TestModel_DashboardUpdate(t *testing.T) {
 	tests := []struct {
 		name           string
-		keyMsg         tea.KeyMsg
+		keyMsg         tea.KeyPressMsg
 		expectQuit     bool
 		expectCommands bool
 	}{
 		{
 			name:       "q key quits",
-			keyMsg:     tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}},
+			keyMsg:     tea.KeyPressMsg{Code: 'q', Text: "q"},
 			expectQuit: true,
 		},
 		{
 			name:       "ctrl+c quits",
-			keyMsg:     tea.KeyMsg{Type: tea.KeyCtrlC},
+			keyMsg:     tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl},
 			expectQuit: true,
 		},
 		{
 			name:           "c key opens commands",
-			keyMsg:         tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}},
+			keyMsg:         tea.KeyPressMsg{Code: 'c', Text: "c"},
 			expectCommands: true,
 		},
 		{
 			name:   "other keys do nothing",
-			keyMsg: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}},
+			keyMsg: tea.KeyPressMsg{Code: 'x', Text: "x"},
 		},
 	}
 
@@ -1398,7 +1398,7 @@ func TestModel_DashboardView(t *testing.T) {
 
 			m := &model{
 				randomizer:  mockRandom,
-				domain:      "tunnl.live",
+				domain:      "tunel.live",
 				protocol:    tt.protocol,
 				tunnelType:  tt.tunnelType,
 				port:        tt.port,
@@ -1550,8 +1550,8 @@ func TestBuildURL(t *testing.T) {
 			name:      "http url",
 			protocol:  "http",
 			subdomain: "test",
-			domain:    "tunnl.live",
-			expected:  "http://test.tunnl.live",
+			domain:    "tunel.live",
+			expected:  "http://test.tunel.live",
 		},
 		{
 			name:      "https url",
@@ -1564,8 +1564,8 @@ func TestBuildURL(t *testing.T) {
 			name:      "custom subdomain",
 			protocol:  "http",
 			subdomain: "my-custom-slug",
-			domain:    "tunnl.live",
-			expected:  "http://my-custom-slug.tunnl.live",
+			domain:    "tunel.live",
+			expected:  "http://my-custom-slug.tunel.live",
 		},
 	}
 
@@ -1712,30 +1712,30 @@ func TestModel_GetTunnelURL(t *testing.T) {
 			tunnelType: types.TunnelTypeHTTP,
 			protocol:   "http",
 			slug:       "my-app",
-			domain:     "tunnl.live",
-			expected:   "http://my-app.tunnl.live",
+			domain:     "tunel.live",
+			expected:   "http://my-app.tunel.live",
 		},
 		{
 			name:       "https tunnel",
 			tunnelType: types.TunnelTypeHTTP,
 			protocol:   "https",
 			slug:       "secure-app",
-			domain:     "tunnl.live",
-			expected:   "https://secure-app.tunnl.live",
+			domain:     "tunel.live",
+			expected:   "https://secure-app.tunel.live",
 		},
 		{
 			name:       "tcp tunnel",
 			tunnelType: types.TunnelTypeTCP,
-			domain:     "tunnl.live",
+			domain:     "tunel.live",
 			port:       8080,
-			expected:   "tcp://tunnl.live:8080",
+			expected:   "tcp://tunel.live:8080",
 		},
 		{
 			name:       "tcp tunnel with different port",
 			tunnelType: types.TunnelTypeTCP,
-			domain:     "tunnl.live",
+			domain:     "tunel.live",
 			port:       3306,
-			expected:   "tcp://tunnl.live:3306",
+			expected:   "tcp://tunel.live:3306",
 		},
 	}
 
@@ -1797,28 +1797,28 @@ func TestInteraction_Start_Interactive(t *testing.T) {
 			tlsEnabled: false,
 			tunnelType: types.TunnelTypeHTTP,
 			port:       8080,
-			domain:     "tunnl.live",
+			domain:     "tunel.live",
 		},
 		{
 			name:       "interactive mode with https",
 			tlsEnabled: true,
 			tunnelType: types.TunnelTypeHTTP,
 			port:       8443,
-			domain:     "secure.tunnl.live",
+			domain:     "secure.tunel.live",
 		},
 		{
 			name:       "interactive mode with tcp",
 			tlsEnabled: false,
 			tunnelType: types.TunnelTypeTCP,
 			port:       3306,
-			domain:     "db.tunnl.live",
+			domain:     "db.tunel.live",
 		},
 		{
 			name:       "interactive mode with tcp and tls enabled",
 			tlsEnabled: true,
 			tunnelType: types.TunnelTypeTCP,
 			port:       5432,
-			domain:     "postgres.tunnl.live",
+			domain:     "postgres.tunel.live",
 		},
 	}
 
@@ -1901,7 +1901,7 @@ func TestInteraction_Start_ProtocolSelection(t *testing.T) {
 			mockSessionRegistry := &MockSessionRegistry{}
 			closeFunc := func() error { return nil }
 
-			mockConfig.On("Domain").Return("tunnl.live")
+			mockConfig.On("Domain").Return("tunel.live")
 			mockConfig.On("TLSEnabled").Return(tt.tlsEnabled)
 			mockForwarder.On("TunnelType").Return(types.TunnelTypeHTTP)
 			mockForwarder.On("ForwardedPort").Return(uint16(8080))
@@ -1966,7 +1966,7 @@ func TestInteraction_Stop(t *testing.T) {
 			i := mockInteraction.(*interaction)
 
 			if tt.setupProgram {
-				mockConfig.On("Domain").Return("tunnl.live")
+				mockConfig.On("Domain").Return("tunel.live")
 				mockConfig.On("TLSEnabled").Return(false)
 				mockForwarder.On("TunnelType").Return(types.TunnelTypeHTTP)
 				mockForwarder.On("ForwardedPort").Return(uint16(8080))
@@ -2007,7 +2007,7 @@ func TestInteraction_Start_CommandListSetup(t *testing.T) {
 	mockSessionRegistry := &MockSessionRegistry{}
 	closeFunc := func() error { return nil }
 
-	mockConfig.On("Domain").Return("tunnl.live")
+	mockConfig.On("Domain").Return("tunel.live")
 	mockConfig.On("TLSEnabled").Return(false)
 	mockForwarder.On("TunnelType").Return(types.TunnelTypeHTTP)
 	mockForwarder.On("ForwardedPort").Return(uint16(8080))
@@ -2043,7 +2043,7 @@ func TestInteraction_Start_TextInputSetup(t *testing.T) {
 	mockSessionRegistry := &MockSessionRegistry{}
 	closeFunc := func() error { return nil }
 
-	mockConfig.On("Domain").Return("tunnl.live")
+	mockConfig.On("Domain").Return("tunel.live")
 	mockConfig.On("TLSEnabled").Return(false)
 	mockForwarder.On("TunnelType").Return(types.TunnelTypeHTTP)
 	mockForwarder.On("ForwardedPort").Return(uint16(8080))
@@ -2107,7 +2107,7 @@ func TestInteraction_Start_CleanupOnExit(t *testing.T) {
 				}
 			}
 
-			mockConfig.On("Domain").Return("tunnl.live")
+			mockConfig.On("Domain").Return("tunel.live")
 			mockConfig.On("TLSEnabled").Return(false)
 			mockForwarder.On("TunnelType").Return(types.TunnelTypeHTTP)
 			mockForwarder.On("ForwardedPort").Return(uint16(8080))
@@ -2171,7 +2171,7 @@ func TestInteraction_Start_WithDifferentChannels(t *testing.T) {
 			mockSessionRegistry := &MockSessionRegistry{}
 			closeFunc := func() error { return nil }
 
-			mockConfig.On("Domain").Return("tunnl.live")
+			mockConfig.On("Domain").Return("tunel.live")
 			mockConfig.On("TLSEnabled").Return(false)
 			mockForwarder.On("TunnelType").Return(types.TunnelTypeHTTP)
 			mockForwarder.On("ForwardedPort").Return(uint16(8080))

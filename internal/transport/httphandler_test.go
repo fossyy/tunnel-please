@@ -290,7 +290,7 @@ func TestHandler(t *testing.T) {
 			isTLS:       true,
 			redirectTLS: false,
 			request:     []byte("GET / HTTP/1.1\r\nHost: test.domain\r\n\r\n"),
-			expected:    []byte("HTTP/1.1 301 Moved Permanently\r\nLocation: https://tunnl.live/tunnel-not-found?slug=test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+			expected:    []byte("HTTP/1.1 301 Moved Permanently\r\nLocation: https://tunel.live/tunnel-not-found?slug=test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
 			setupMocks: func(msr *MockSessionRegistry) {
 				msr.On("Get", types.SessionKey{
 					Id:   "test",

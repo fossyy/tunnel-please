@@ -9,13 +9,12 @@ import (
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -120,7 +119,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
 		m.showingComingSoon = false
-		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
+		return m, textinput.Blink
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -129,17 +128,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.commandList.SetHeight(msg.Height - 4)
 
 		if msg.Width < 80 {
-			m.slugInput.Width = msg.Width - 10
+			m.slugInput.SetWidth(msg.Width - 10)
 		} else {
-			m.slugInput.Width = 50
+			m.slugInput.SetWidth(50)
 		}
 		return m, nil
 
 	case tea.QuitMsg:
 		m.quitting = true
-		return m, tea.Batch(tea.ClearScreen, textinput.Blink, tea.Quit)
+		return m, tea.Batch(textinput.Blink, tea.Quit)
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.showingComingSoon {
 			return m.comingSoonUpdate(msg)
 		}
@@ -160,35 +159,37 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (i *interaction) Redraw() {
 	if i.program != nil {
-		i.program.Send(tea.ClearScreen())
+		i.program.Send(tea.WindowSizeMsg{})
 	}
 }
 
-func (m *model) View() string {
+func (m *model) View() tea.View {
 	if m.quitting {
-		return ""
+		return tea.NewView("")
 	}
 
 	if m.showingComingSoon {
-		return m.comingSoonView()
+		return tea.NewView(m.comingSoonView())
 	}
 
 	if m.editingSlug {
-		return m.slugView()
+		return tea.NewView(m.slugView())
 	}
 
 	if m.showingCommands {
-		return m.commandsView()
+		return tea.NewView(m.commandsView())
 	}
 
-	return m.dashboardView()
+	v := tea.NewView(m.dashboardView())
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
 }
 
 func (i *interaction) Start() {
 	if i.mode == types.InteractiveModeHEADLESS {
 		return
 	}
-	lipgloss.SetColorProfile(termenv.TrueColor)
 
 	protocol := "http"
 	if i.config.TLSEnabled() {
@@ -216,7 +217,7 @@ func (i *interaction) Start() {
 	ti := textinput.New()
 	ti.Placeholder = "my-custom-slug"
 	ti.CharLimit = 20
-	ti.Width = 50
+	ti.SetWidth(50)
 
 	m := &model{
 		randomizer:  i.randomizer,
@@ -249,8 +250,7 @@ func (i *interaction) Start() {
 		m,
 		tea.WithInput(i.channel),
 		tea.WithOutput(i.channel),
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
+		tea.WithColorProfile(colorprofile.TrueColor),
 		tea.WithoutSignals(),
 		tea.WithoutSignalHandler(),
 		tea.WithFPS(30),
