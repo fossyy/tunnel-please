@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	charm.land/bubbles/v2 v2.0.0
-	charm.land/bubbletea/v2 v2.0.1
+	charm.land/bubbletea/v2 v2.0.2
 	charm.land/lipgloss/v2 v2.0.0
 	git.fossy.my.id/bagas/tunnel-please-grpc v1.5.0
 	github.com/caddyserver/certmagic v0.25.2
