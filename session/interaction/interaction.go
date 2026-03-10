@@ -53,6 +53,8 @@ type interaction struct {
 	cancel          context.CancelFunc
 	mode            types.InteractiveMode
 	programMu       sync.Mutex
+	width           int
+	height          int
 }
 
 func (i *interaction) SetMode(m types.InteractiveMode) {
@@ -71,8 +73,14 @@ func (i *interaction) Send(message string) error {
 	return nil
 }
 func (i *interaction) SetWH(w, h int) {
-	if i.program != nil {
-		i.program.Send(tea.WindowSizeMsg{
+	i.programMu.Lock()
+	i.width = w
+	i.height = h
+	prog := i.program
+	i.programMu.Unlock()
+
+	if prog != nil {
+		prog.Send(tea.WindowSizeMsg{
 			Width:  w,
 			Height: h,
 		})
@@ -158,8 +166,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (i *interaction) Redraw() {
-	if i.program != nil {
-		i.program.Send(tea.WindowSizeMsg{})
+	i.programMu.Lock()
+	prog := i.program
+	w, h := i.width, i.height
+	i.programMu.Unlock()
+
+	if prog != nil {
+		prog.Send(tea.WindowSizeMsg{Width: w, Height: h})
 	}
 }
 
@@ -246,18 +259,34 @@ func (i *interaction) Start() {
 	}
 
 	i.programMu.Lock()
-	i.program = tea.NewProgram(
-		m,
+	w, h := i.width, i.height
+	i.programMu.Unlock()
+
+	opts := []tea.ProgramOption{
 		tea.WithInput(i.channel),
 		tea.WithOutput(i.channel),
 		tea.WithColorProfile(colorprofile.TrueColor),
 		tea.WithoutSignals(),
 		tea.WithoutSignalHandler(),
 		tea.WithFPS(30),
-	)
+		tea.WithEnvironment([]string{"TERM=xterm-256color", "COLORTERM=truecolor"}),
+	}
+	if w > 0 && h > 0 {
+		opts = append(opts, tea.WithWindowSize(w, h))
+	}
+
+	prog := tea.NewProgram(m, opts...)
+
+	i.programMu.Lock()
+	i.program = prog
+	latestW, latestH := i.width, i.height
 	i.programMu.Unlock()
 
-	_, err := i.program.Run()
+	if latestW > 0 && latestH > 0 {
+		prog.Send(tea.WindowSizeMsg{Width: latestW, Height: latestH})
+	}
+
+	_, err := prog.Run()
 	if err != nil {
 		log.Printf("Cannot close tea: %s \n", err)
 	}
