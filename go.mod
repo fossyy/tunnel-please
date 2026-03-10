@@ -8,7 +8,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.1
 	git.fossy.my.id/bagas/tunnel-please-grpc v1.5.0
 	github.com/caddyserver/certmagic v0.25.2
-	github.com/charmbracelet/colorprofile v0.4.2
+	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/joho/godotenv v1.5.1
 	github.com/libdns/cloudflare v0.2.2
 	github.com/stretchr/testify v1.11.1
