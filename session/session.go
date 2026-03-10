@@ -232,11 +232,32 @@ func (s *session) handleWindowChange(req *ssh.Request) error {
 	return req.Reply(true, nil)
 }
 
+func (s *session) handlePtyReq(req *ssh.Request) error {
+	var ptyPayload struct {
+		Term   string
+		Width  uint32
+		Height uint32
+		PxW    uint32
+		PxH    uint32
+		Modes  string
+	}
+	if err := ssh.Unmarshal(req.Payload, &ptyPayload); err == nil {
+		if ptyPayload.Width > 0 && ptyPayload.Height > 0 {
+			s.interaction.SetWH(int(ptyPayload.Width), int(ptyPayload.Height))
+		}
+	}
+	return req.Reply(true, nil)
+}
+
 func (s *session) HandleGlobalRequest(GlobalRequest <-chan *ssh.Request) error {
 	for req := range GlobalRequest {
 		switch req.Type {
-		case "shell", "pty-req":
+		case "shell":
 			if err := req.Reply(true, nil); err != nil {
+				return err
+			}
+		case "pty-req":
+			if err := s.handlePtyReq(req); err != nil {
 				return err
 			}
 		case "window-change":
