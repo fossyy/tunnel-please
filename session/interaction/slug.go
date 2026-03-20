@@ -5,26 +5,26 @@ import (
 	"strings"
 	"tunnel_pls/types"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
-func (m *model) slugUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *model) slugUpdate(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	if m.tunnelType != types.TunnelTypeHTTP {
 		m.editingSlug = false
 		m.slugError = ""
-		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
+		return m, textinput.Blink
 	}
 
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.editingSlug = false
 		m.slugError = ""
-		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
+		return m, textinput.Blink
 	case "enter":
 		inputValue := m.slugInput.Value()
 		if err := m.interaction.sessionRegistry.Update(m.interaction.user, types.SessionKey{
@@ -39,7 +39,7 @@ func (m *model) slugUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.editingSlug = false
 		m.slugError = ""
-		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
+		return m, textinput.Blink
 	default:
 		if key.Matches(msg, m.keymap.random) {
 			newSubdomain, err := m.randomizer.String(20)

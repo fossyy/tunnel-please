@@ -4,10 +4,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func (m *model) handleCommandSelection(item commandItem) (tea.Model, tea.Cmd) {
@@ -17,24 +17,24 @@ func (m *model) handleCommandSelection(item commandItem) (tea.Model, tea.Cmd) {
 		m.editingSlug = true
 		m.slugInput.SetValue(m.interaction.slug.String())
 		m.slugInput.Focus()
-		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
+		return m, textinput.Blink
 	case "tunnel-type":
 		m.showingCommands = false
 		m.showingComingSoon = true
-		return m, tea.Batch(tickCmd(5*time.Second), tea.ClearScreen, textinput.Blink)
+		return m, tickCmd(5 * time.Second)
 	default:
 		m.showingCommands = false
 		return m, nil
 	}
 }
 
-func (m *model) commandsUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *model) commandsUpdate(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch {
 	case key.Matches(msg, m.keymap.quit), msg.String() == "esc":
 		m.showingCommands = false
-		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
+		return m, textinput.Blink
 	case msg.String() == "enter":
 		selectedItem := m.commandList.SelectedItem()
 		if selectedItem != nil {
