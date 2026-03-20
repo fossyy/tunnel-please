@@ -6,11 +6,11 @@ import (
 	"tunnel_pls/internal/random"
 	"tunnel_pls/types"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 type commandItem struct {
@@ -77,7 +77,7 @@ type keymap struct {
 type tickMsg time.Time
 
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, tea.WindowSize())
+	return tea.RequestWindowSize
 }
 
 func getResponsiveWidth(screenWidth, padding, minWidth, maxWidth int) int {

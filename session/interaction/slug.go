@@ -5,26 +5,24 @@ import (
 	"strings"
 	"tunnel_pls/types"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-func (m *model) slugUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
+func (m *model) slugUpdate(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.tunnelType != types.TunnelTypeHTTP {
 		m.editingSlug = false
 		m.slugError = ""
-		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
+		return m, nil
 	}
 
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.editingSlug = false
 		m.slugError = ""
-		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
+		return m, nil
 	case "enter":
 		inputValue := m.slugInput.Value()
 		if err := m.interaction.sessionRegistry.Update(m.interaction.user, types.SessionKey{
@@ -39,18 +37,18 @@ func (m *model) slugUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.editingSlug = false
 		m.slugError = ""
-		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
+		return m, nil
 	default:
 		if key.Matches(msg, m.keymap.random) {
 			newSubdomain, err := m.randomizer.String(20)
 			if err != nil {
-				return m, cmd
+				return m, nil
 			}
 			m.slugInput.SetValue(newSubdomain)
 		}
 		m.slugError = ""
-		m.slugInput, cmd = m.slugInput.Update(msg)
-		return m, cmd
+		m.slugInput, _ = m.slugInput.Update(msg)
+		return m, nil
 	}
 }
 

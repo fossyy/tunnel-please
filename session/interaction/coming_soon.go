@@ -3,14 +3,14 @@ package interaction
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 )
 
-func (m *model) comingSoonUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *model) comingSoonUpdate(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	_ = msg
 	m.showingComingSoon = false
-	return m, tea.Batch(tea.ClearScreen, textinput.Blink)
+	return m, nil
 }
 
 func (m *model) comingSoonView() string {

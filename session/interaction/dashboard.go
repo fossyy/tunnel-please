@@ -4,20 +4,19 @@ import (
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-func (m *model) dashboardUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *model) dashboardUpdate(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keymap.quit):
 		m.quitting = true
-		return m, tea.Batch(tea.ClearScreen, textinput.Blink, tea.Quit)
+		return m, tea.Quit
 	case key.Matches(msg, m.keymap.command):
 		m.showingCommands = true
-		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
+		return m, nil
 	}
 	return m, nil
 }

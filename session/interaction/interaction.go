@@ -9,11 +9,11 @@ import (
 	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 	"golang.org/x/crypto/ssh"
@@ -120,7 +120,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
 		m.showingComingSoon = false
-		return m, tea.Batch(tea.ClearScreen, textinput.Blink)
+		return m, nil
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -137,9 +137,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.QuitMsg:
 		m.quitting = true
-		return m, tea.Batch(tea.ClearScreen, textinput.Blink, tea.Quit)
+		return m, tea.Quit
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.showingComingSoon {
 			return m.comingSoonUpdate(msg)
 		}
@@ -160,28 +160,28 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (i *interaction) Redraw() {
 	if i.program != nil {
-		i.program.Send(tea.ClearScreen())
+		i.program.Send(tea.WindowSizeMsg{})
 	}
 }
 
-func (m *model) View() string {
+func (m *model) View() tea.View {
+	var content string
 	if m.quitting {
-		return ""
+		content = ""
+	} else if m.showingComingSoon {
+		content = m.comingSoonView()
+	} else if m.editingSlug {
+		content = m.slugView()
+	} else if m.showingCommands {
+		content = m.commandsView()
+	} else {
+		content = m.dashboardView()
 	}
 
-	if m.showingComingSoon {
-		return m.comingSoonView()
-	}
-
-	if m.editingSlug {
-		return m.slugView()
-	}
-
-	if m.showingCommands {
-		return m.commandsView()
-	}
-
-	return m.dashboardView()
+	v := tea.NewView(content)
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
 }
 
 func (i *interaction) Start() {
@@ -249,8 +249,6 @@ func (i *interaction) Start() {
 		m,
 		tea.WithInput(i.channel),
 		tea.WithOutput(i.channel),
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
 		tea.WithoutSignals(),
 		tea.WithoutSignalHandler(),
 		tea.WithFPS(30),
