@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-	"tunnel_pls/session/slug"
-	"tunnel_pls/types"
+	"tunnel_pls/internal/session/slug"
+	"tunnel_pls/internal/types"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"

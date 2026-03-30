@@ -9,7 +9,7 @@ import (
 	"time"
 	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/registry"
-	"tunnel_pls/types"
+	"tunnel_pls/internal/types"
 
 	proto "git.fossy.my.id/bagas/tunnel-please-grpc/gen"
 	"google.golang.org/grpc"

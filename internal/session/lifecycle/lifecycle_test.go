@@ -6,7 +6,7 @@ import (
 	"io"
 	"net"
 	"testing"
-	"tunnel_pls/types"
+	"tunnel_pls/internal/types"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"

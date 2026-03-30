@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 	"tunnel_pls/internal/random"
-	"tunnel_pls/types"
+	"tunnel_pls/internal/types"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"

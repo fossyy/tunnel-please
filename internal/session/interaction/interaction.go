@@ -6,8 +6,8 @@ import (
 	"sync"
 	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/random"
-	"tunnel_pls/session/slug"
-	"tunnel_pls/types"
+	"tunnel_pls/internal/session/slug"
+	"tunnel_pls/internal/types"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"

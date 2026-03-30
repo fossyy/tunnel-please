@@ -3,11 +3,11 @@ package registry
 import (
 	"fmt"
 	"sync"
-	"tunnel_pls/session/forwarder"
-	"tunnel_pls/session/interaction"
-	"tunnel_pls/session/lifecycle"
-	"tunnel_pls/session/slug"
-	"tunnel_pls/types"
+	"tunnel_pls/internal/session/forwarder"
+	"tunnel_pls/internal/session/interaction"
+	"tunnel_pls/internal/session/lifecycle"
+	"tunnel_pls/internal/session/slug"
+	"tunnel_pls/internal/types"
 )
 
 type Key = types.SessionKey

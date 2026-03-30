@@ -13,7 +13,7 @@ import (
 	"tunnel_pls/internal/port"
 	"tunnel_pls/internal/random"
 	"tunnel_pls/internal/registry"
-	"tunnel_pls/session"
+	"tunnel_pls/internal/session"
 
 	"golang.org/x/crypto/ssh"
 )
