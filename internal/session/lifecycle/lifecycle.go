@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 	"tunnel_pls/internal/session/slug"
+	"tunnel_pls/internal/types"
 
 	portUtil "tunnel_pls/internal/port"
-	"tunnel_pls/types"
 
 	"golang.org/x/crypto/ssh"
 )

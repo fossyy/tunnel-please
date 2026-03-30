@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 	"tunnel_pls/internal/config"
-	"tunnel_pls/types"
+	"tunnel_pls/internal/types"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"

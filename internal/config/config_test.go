@@ -3,7 +3,7 @@ package config
 import (
 	"os"
 	"testing"
-	"tunnel_pls/types"
+	"tunnel_pls/internal/types"
 
 	"github.com/stretchr/testify/assert"
 )

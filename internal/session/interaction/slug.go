@@ -3,7 +3,7 @@ package interaction
 import (
 	"fmt"
 	"strings"
-	"tunnel_pls/types"
+	"tunnel_pls/internal/types"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"

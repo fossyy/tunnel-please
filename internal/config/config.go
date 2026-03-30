@@ -1,6 +1,8 @@
 package config
 
-import "tunnel_pls/types"
+import (
+	"tunnel_pls/internal/types"
+)
 
 type Config interface {
 	Domain() string

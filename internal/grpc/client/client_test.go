@@ -11,10 +11,10 @@ import (
 	"tunnel_pls/internal/session/interaction"
 	"tunnel_pls/internal/session/lifecycle"
 	"tunnel_pls/internal/session/slug"
+	"tunnel_pls/internal/types"
 
 	"tunnel_pls/internal/port"
 	"tunnel_pls/internal/registry"
-	"tunnel_pls/types"
 
 	proto "git.fossy.my.id/bagas/tunnel-please-grpc/gen"
 	"github.com/stretchr/testify/assert"
