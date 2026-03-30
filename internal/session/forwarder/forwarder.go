@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"sync"
 	"tunnel_pls/internal/config"
-	"tunnel_pls/session/slug"
+	"tunnel_pls/internal/session/slug"
 	"tunnel_pls/types"
 
 	"golang.org/x/crypto/ssh"
