@@ -17,7 +17,7 @@ import (
 	"tunnel_pls/internal/session/lifecycle"
 	"tunnel_pls/internal/session/slug"
 	"tunnel_pls/internal/transport"
-	"tunnel_pls/types"
+	"tunnel_pls/internal/types"
 
 	"golang.org/x/crypto/ssh"
 )

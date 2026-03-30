@@ -17,8 +17,8 @@ import (
 	"tunnel_pls/internal/registry"
 	"tunnel_pls/internal/server"
 	"tunnel_pls/internal/transport"
+	"tunnel_pls/internal/types"
 	"tunnel_pls/internal/version"
-	"tunnel_pls/types"
 
 	"golang.org/x/crypto/ssh"
 )

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"tunnel_pls/types"
+	"tunnel_pls/internal/types"
 
 	"github.com/joho/godotenv"
 )
@@ -32,7 +32,7 @@ type config struct {
 
 	bufferSize int
 	headerSize int
-	
+
 	pprofEnabled bool
 	pprofPort    string
 

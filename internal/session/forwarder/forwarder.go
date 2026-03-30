@@ -11,7 +11,7 @@ import (
 	"sync"
 	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/session/slug"
-	"tunnel_pls/types"
+	"tunnel_pls/internal/types"
 
 	"golang.org/x/crypto/ssh"
 )

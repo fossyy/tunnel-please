@@ -16,7 +16,7 @@ import (
 	"tunnel_pls/internal/http/stream"
 	"tunnel_pls/internal/middleware"
 	"tunnel_pls/internal/registry"
-	"tunnel_pls/types"
+	"tunnel_pls/internal/types"
 
 	"golang.org/x/crypto/ssh"
 )

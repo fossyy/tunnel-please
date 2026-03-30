@@ -7,7 +7,7 @@ import (
 	"tunnel_pls/internal/session/interaction"
 	"tunnel_pls/internal/session/lifecycle"
 	"tunnel_pls/internal/session/slug"
-	"tunnel_pls/types"
+	"tunnel_pls/internal/types"
 )
 
 type Key = types.SessionKey

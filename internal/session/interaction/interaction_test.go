@@ -7,7 +7,7 @@ import (
 	"net"
 	"testing"
 	"time"
-	"tunnel_pls/types"
+	"tunnel_pls/internal/types"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"

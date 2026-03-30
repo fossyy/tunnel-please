@@ -11,7 +11,7 @@ import (
 	"time"
 	"tunnel_pls/internal/registry"
 	"tunnel_pls/internal/session/slug"
-	"tunnel_pls/types"
+	"tunnel_pls/internal/types"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
