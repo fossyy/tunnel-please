@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-	"tunnel_pls/session/slug"
+	"tunnel_pls/internal/session/slug"
 	"tunnel_pls/types"
 
 	"github.com/stretchr/testify/assert"

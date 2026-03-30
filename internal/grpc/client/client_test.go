@@ -7,13 +7,13 @@ import (
 	"io"
 	"testing"
 	"time"
+	"tunnel_pls/internal/session/forwarder"
+	"tunnel_pls/internal/session/interaction"
+	"tunnel_pls/internal/session/lifecycle"
+	"tunnel_pls/internal/session/slug"
 
 	"tunnel_pls/internal/port"
 	"tunnel_pls/internal/registry"
-	"tunnel_pls/session/forwarder"
-	"tunnel_pls/session/interaction"
-	"tunnel_pls/session/lifecycle"
-	"tunnel_pls/session/slug"
 	"tunnel_pls/types"
 
 	proto "git.fossy.my.id/bagas/tunnel-please-grpc/gen"

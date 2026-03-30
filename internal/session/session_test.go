@@ -15,7 +15,7 @@ import (
 	"time"
 	"tunnel_pls/internal/config"
 	"tunnel_pls/internal/registry"
-	"tunnel_pls/session/lifecycle"
+	"tunnel_pls/internal/session/lifecycle"
 	"tunnel_pls/types"
 
 	"github.com/stretchr/testify/assert"
