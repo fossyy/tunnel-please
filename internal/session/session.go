@@ -158,7 +158,7 @@ func (s *session) setupInteractiveMode(channel ssh.NewChannel) error {
 	}
 
 	go func() {
-		err = s.HandleGlobalRequest(reqs)
+		err := s.HandleGlobalRequest(reqs)
 		if err != nil {
 			log.Printf("global request handler error: %v", err)
 		}
@@ -378,8 +378,7 @@ func (s *session) HandleTCPForward(req *ssh.Request, addr string, portToBind uin
 	}
 
 	go func() {
-		err = tcpServer.Serve(listener)
-		if err != nil {
+		if err := tcpServer.Serve(listener); err != nil {
 			log.Printf("Failed serving tcp server: %s\n", err)
 		}
 	}()
