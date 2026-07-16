@@ -28,6 +28,7 @@ type Forwarder interface {
 	Close() error
 }
 type forwarder struct {
+	mu            sync.RWMutex
 	listener      net.Listener
 	tunnelType    types.TunnelType
 	forwardedPort uint16
@@ -60,7 +61,7 @@ func (f *forwarder) copyWithBuffer(dst io.Writer, src io.Reader) (written int64,
 }
 
 func (f *forwarder) OpenForwardedChannel(ctx context.Context, origin net.Addr) (ssh.Channel, <-chan *ssh.Request, error) {
-	payload := createForwardedTCPIPPayload(origin, f.forwardedPort)
+	payload := createForwardedTCPIPPayload(origin, f.ForwardedPort())
 	type channelResult struct {
 		channel ssh.Channel
 		reqs    <-chan *ssh.Request
@@ -141,32 +142,44 @@ func (f *forwarder) HandleConnection(dst io.ReadWriter, src ssh.Channel) {
 }
 
 func (f *forwarder) SetType(tunnelType types.TunnelType) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.tunnelType = tunnelType
 }
 
 func (f *forwarder) TunnelType() types.TunnelType {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	return f.tunnelType
 }
 
 func (f *forwarder) ForwardedPort() uint16 {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	return f.forwardedPort
 }
 
 func (f *forwarder) SetForwardedPort(port uint16) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.forwardedPort = port
 }
 
 func (f *forwarder) SetListener(listener net.Listener) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.listener = listener
 }
 
 func (f *forwarder) Listener() net.Listener {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	return f.listener
 }
 
 func (f *forwarder) Close() error {
-	if f.Listener() != nil {
-		return f.listener.Close()
+	if listener := f.Listener(); listener != nil {
+		return listener.Close()
 	}
 	return nil
 }
