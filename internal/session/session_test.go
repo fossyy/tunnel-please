@@ -807,7 +807,7 @@ func (m *mockNewChanFail) Accept() (ssh.Channel, <-chan *ssh.Request, error) {
 }
 
 func TestWaitForTCPIPForward_EdgeCases(t *testing.T) {
-	t.Run("Wrong Request Type", func(t *testing.T) {
+	t.Run("Wrong Request Type Then Timeout", func(t *testing.T) {
 		_, sReqs, _, cConn, cleanup := setupSSH(t)
 		defer cleanup()
 
@@ -817,9 +817,64 @@ func TestWaitForTCPIPForward_EdgeCases(t *testing.T) {
 			_, _, _ = cConn.SendRequest("not-tcpip-forward", true, nil)
 		}()
 
+		start := time.Now()
 		req := s.waitForTCPIPForward()
+		elapsed := time.Since(start)
+
 		if req != nil {
 			t.Error("expected nil request")
+		}
+		if elapsed < 400*time.Millisecond {
+			t.Errorf("expected timeout ~500ms, got %v", elapsed)
+		}
+	})
+
+	t.Run("Multiple Non-Forward Requests Then Success", func(t *testing.T) {
+		_, sReqs, _, cConn, cleanup := setupSSH(t)
+		defer cleanup()
+
+		s := &session{initialReq: sReqs}
+
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			_, _, _ = cConn.SendRequest("keepalive@openssh.com", false, nil)
+			time.Sleep(100 * time.Millisecond)
+			_, _, _ = cConn.SendRequest("hostkeys-00@openssh.com", false, nil)
+			time.Sleep(100 * time.Millisecond)
+			_, _, _ = cConn.SendRequest("tcpip-forward", true, nil)
+		}()
+
+		req := s.waitForTCPIPForward()
+		if req == nil {
+			t.Error("expected tcpip-forward request, got nil")
+		}
+		if req != nil && req.Type != "tcpip-forward" {
+			t.Errorf("expected tcpip-forward, got %s", req.Type)
+		}
+	})
+
+	t.Run("Timeout After Non-Forward Requests", func(t *testing.T) {
+		_, sReqs, _, cConn, cleanup := setupSSH(t)
+		defer cleanup()
+
+		s := &session{initialReq: sReqs}
+
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			_, _, _ = cConn.SendRequest("keepalive@openssh.com", false, nil)
+			time.Sleep(100 * time.Millisecond)
+			_, _, _ = cConn.SendRequest("hostkeys-00@openssh.com", false, nil)
+		}()
+
+		start := time.Now()
+		req := s.waitForTCPIPForward()
+		elapsed := time.Since(start)
+
+		if req != nil {
+			t.Error("expected nil request after timeout")
+		}
+		if elapsed < 400*time.Millisecond {
+			t.Errorf("expected timeout ~500ms after last request, got %v", elapsed)
 		}
 	})
 

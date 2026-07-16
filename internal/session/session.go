@@ -200,23 +200,22 @@ func (s *session) waitForSessionEnd() error {
 }
 
 func (s *session) waitForTCPIPForward() *ssh.Request {
-	select {
-	case req, ok := <-s.initialReq:
-		if !ok {
-			log.Println("Forwarding request channel closed")
+	for {
+		select {
+		case req, ok := <-s.initialReq:
+			if !ok {
+				log.Println("Forwarding request channel closed")
+				return nil
+			}
+			if req.Type == "tcpip-forward" {
+				return req
+			}
+			log.Printf("Ignoring unexpected global request: %s", req.Type)
+			_ = req.Reply(false, nil)
+		case <-time.After(500 * time.Millisecond):
+			log.Println("No tcpip-forward request received within timeout")
 			return nil
 		}
-		if req.Type == "tcpip-forward" {
-			return req
-		}
-		if err := req.Reply(false, nil); err != nil {
-			log.Printf("Failed to reply to request: %v", err)
-		}
-		log.Printf("Expected tcpip-forward request, got: %s", req.Type)
-		return nil
-	case <-time.After(500 * time.Millisecond):
-		log.Println("No forwarding request received")
-		return nil
 	}
 }
 
