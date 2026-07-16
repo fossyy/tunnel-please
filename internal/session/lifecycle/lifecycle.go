@@ -2,14 +2,13 @@ package lifecycle
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
 	"time"
 	"tunnel_pls/internal/session/slug"
 	"tunnel_pls/internal/types"
-
-	portUtil "tunnel_pls/internal/port"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -24,6 +23,12 @@ type SessionRegistry interface {
 	Remove(key types.SessionKey)
 }
 
+type PortRegistry interface {
+	Unassigned() (uint16, bool)
+	Claim(port uint16) bool
+	SetStatus(port uint16, assigned bool) error
+}
+
 type lifecycle struct {
 	mu              sync.Mutex
 	status          types.SessionStatus
@@ -34,18 +39,18 @@ type lifecycle struct {
 	slug            slug.Slug
 	startedAt       time.Time
 	sessionRegistry SessionRegistry
-	portRegistry    portUtil.Port
+	portRegistry    PortRegistry
 	user            string
 }
 
-func New(conn ssh.Conn, forwarder Forwarder, slugManager slug.Slug, port portUtil.Port, sessionRegistry SessionRegistry, user string) Lifecycle {
+func New(conn ssh.Conn, forwarder Forwarder, slugManager slug.Slug, port PortRegistry, sessionRegistry SessionRegistry, user string) Lifecycle {
 	return &lifecycle{
 		status:          types.SessionStatusINITIALIZING,
 		conn:            conn,
 		channel:         nil,
 		forwarder:       forwarder,
 		slug:            slugManager,
-		startedAt:       time.Now(),
+		startedAt:       time.Time{},
 		sessionRegistry: sessionRegistry,
 		portRegistry:    port,
 		user:            user,
@@ -55,16 +60,16 @@ func New(conn ssh.Conn, forwarder Forwarder, slugManager slug.Slug, port portUti
 type Lifecycle interface {
 	Connection() ssh.Conn
 	Channel() ssh.Channel
-	PortRegistry() portUtil.Port
+	PortRegistry() PortRegistry
 	User() string
-	SetChannel(channel ssh.Channel)
+	SetChannel(channel ssh.Channel) error
 	SetStatus(status types.SessionStatus)
 	IsActive() bool
 	StartedAt() time.Time
 	Close() error
 }
 
-func (l *lifecycle) PortRegistry() portUtil.Port {
+func (l *lifecycle) PortRegistry() PortRegistry {
 	return l.portRegistry
 }
 
@@ -72,11 +77,25 @@ func (l *lifecycle) User() string {
 	return l.user
 }
 
-func (l *lifecycle) SetChannel(channel ssh.Channel) {
+func (l *lifecycle) SetChannel(channel ssh.Channel) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.status == types.SessionStatusCLOSED {
+		return fmt.Errorf("lifecycle is closed")
+	}
+	if channel == nil {
+		return fmt.Errorf("channel cannot be nil")
+	}
+	if l.channel != nil {
+		return fmt.Errorf("channel already set")
+	}
 	l.channel = channel
+	return nil
 }
 
 func (l *lifecycle) Channel() ssh.Channel {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	return l.channel
 }
 
@@ -87,7 +106,13 @@ func (l *lifecycle) Connection() ssh.Conn {
 func (l *lifecycle) SetStatus(status types.SessionStatus) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.status == types.SessionStatusCLOSED {
+		return
+	}
 	l.status = status
+	if status == types.SessionStatusRUNNING && l.startedAt.IsZero() {
+		l.startedAt = time.Now()
+	}
 }
 
 func (l *lifecycle) IsActive() bool {
@@ -98,50 +123,74 @@ func (l *lifecycle) IsActive() bool {
 
 func (l *lifecycle) Close() error {
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	if l.status == types.SessionStatusCLOSED {
-		return l.closeErr
+		closeErr := l.closeErr
+		l.mu.Unlock()
+		return closeErr
 	}
 	l.status = types.SessionStatusCLOSED
 
+	channel := l.channel
+	conn := l.conn
+	l.mu.Unlock()
+
 	var errs []error
-	tunnelType := l.forwarder.TunnelType()
-
-	if l.channel != nil {
-		if err := l.channel.Close(); err != nil && !isClosedError(err) {
+	if channel != nil {
+		if err := channel.Close(); err != nil && !isClosedError(err) {
+			errs = append(errs, err)
+		}
+	}
+	if conn != nil {
+		if err := conn.Close(); err != nil && !isClosedError(err) {
 			errs = append(errs, err)
 		}
 	}
 
-	if l.conn != nil {
-		if err := l.conn.Close(); err != nil && !isClosedError(err) {
-			errs = append(errs, err)
-		}
+	l.cleanupRegistry()
+	if err := l.cleanupForwarder(); err != nil {
+		errs = append(errs, err)
 	}
 
-	clientSlug := l.slug.String()
+	closeErr := errors.Join(errs...)
+
+	l.mu.Lock()
+	l.closeErr = closeErr
+	l.mu.Unlock()
+
+	return closeErr
+}
+
+func (l *lifecycle) cleanupRegistry() {
+	slugStr := l.slug.String()
+	if slugStr == "" {
+		return
+	}
 	key := types.SessionKey{
-		Id:   clientSlug,
-		Type: tunnelType,
+		Id:   slugStr,
+		Type: l.forwarder.TunnelType(),
 	}
 	l.sessionRegistry.Remove(key)
+}
 
-	if tunnelType == types.TunnelTypeTCP {
-		errs = append(errs, l.PortRegistry().SetStatus(l.forwarder.ForwardedPort(), false))
-		errs = append(errs, l.forwarder.Close())
+func (l *lifecycle) cleanupForwarder() error {
+	if l.forwarder.TunnelType() != types.TunnelTypeTCP {
+		return nil
 	}
-
-	l.closeErr = errors.Join(errs...)
-	return l.closeErr
+	var errs []error
+	errs = append(errs, l.portRegistry.SetStatus(l.forwarder.ForwardedPort(), false))
+	errs = append(errs, l.forwarder.Close())
+	return errors.Join(errs...)
 }
 
 func isClosedError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || err.Error() == "EOF"
+	return errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed)
 }
 
 func (l *lifecycle) StartedAt() time.Time {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	return l.startedAt
 }

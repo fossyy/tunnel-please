@@ -13,7 +13,6 @@ import (
 	"tunnel_pls/internal/session/slug"
 	"tunnel_pls/internal/types"
 
-	"tunnel_pls/internal/port"
 	"tunnel_pls/internal/registry"
 
 	proto "git.fossy.my.id/bagas/tunnel-please-grpc/gen"
@@ -885,16 +884,16 @@ func (m *mockLifecycle) Connection() ssh.Conn {
 	return args.Get(0).(ssh.Conn)
 }
 func (m *mockLifecycle) User() string                         { return m.Called().String(0) }
-func (m *mockLifecycle) SetChannel(channel ssh.Channel)       { m.Called(channel) }
+func (m *mockLifecycle) SetChannel(channel ssh.Channel) error { return m.Called(channel).Error(0) }
 func (m *mockLifecycle) SetStatus(status types.SessionStatus) { m.Called(status) }
 func (m *mockLifecycle) IsActive() bool                       { return m.Called().Bool(0) }
 func (m *mockLifecycle) StartedAt() time.Time                 { return m.Called().Get(0).(time.Time) }
-func (m *mockLifecycle) PortRegistry() port.Port {
+func (m *mockLifecycle) PortRegistry() lifecycle.PortRegistry {
 	args := m.Called()
 	if args.Get(0) == nil {
 		return nil
 	}
-	return args.Get(0).(port.Port)
+	return args.Get(0).(lifecycle.PortRegistry)
 }
 
 type mockEventServiceClient struct {

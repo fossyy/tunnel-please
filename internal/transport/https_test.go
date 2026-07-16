@@ -63,8 +63,7 @@ func TestHTTPSServer_Serve(t *testing.T) {
 
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		err = listener.Close()
-		assert.NoError(t, err)
+		_ = listener.Close()
 	}()
 
 	err = srv.Serve(listener)

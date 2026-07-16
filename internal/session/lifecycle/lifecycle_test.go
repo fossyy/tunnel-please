@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"tunnel_pls/internal/types"
 
@@ -177,8 +178,14 @@ func TestLifecycle_SetChannel(t *testing.T) {
 
 	mockSSHChannel := &MockSSHChannel{}
 
-	mockLifecycle.SetChannel(mockSSHChannel)
+	err := mockLifecycle.SetChannel(mockSSHChannel)
+	assert.NoError(t, err)
+	assert.Equal(t, mockSSHChannel, mockLifecycle.Channel())
 
+	anotherChannel := &MockSSHChannel{}
+	err = mockLifecycle.SetChannel(anotherChannel)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "channel already set")
 	assert.Equal(t, mockSSHChannel, mockLifecycle.Channel())
 }
 
@@ -276,14 +283,15 @@ func TestLifecycle_Close(t *testing.T) {
 			mockLifecycle := New(mockSSHConn, mockForwarder, mockSlug, mockPort, mockSessionRegistry, "mas-fuad")
 
 			mockLifecycle.SetStatus(types.SessionStatusRUNNING)
-			mockLifecycle.SetChannel(mockSSHChannel)
+			err := mockLifecycle.SetChannel(mockSSHChannel)
+			assert.NoError(t, err)
 
 			if tt.alreadyClosed {
-				err := mockLifecycle.Close()
+				err = mockLifecycle.Close()
 				assert.NoError(t, err)
 			}
 
-			err := mockLifecycle.Close()
+			err = mockLifecycle.Close()
 
 			if tt.expectErr {
 				assert.Error(t, err)
@@ -300,4 +308,117 @@ func TestLifecycle_Close(t *testing.T) {
 			mockSSHChannel.AssertExpectations(t)
 		})
 	}
+}
+
+func TestLifecycle_ConcurrentClose(t *testing.T) {
+	mockSSHConn := &MockSSHConn{}
+	mockSSHConn.On("Close").Return(nil)
+
+	mockForwarder := &MockForwarder{}
+	mockForwarder.On("TunnelType").Return(types.TunnelTypeHTTP)
+
+	mockSlug := &MockSlug{}
+	mockSlug.On("String").Return("test-slug")
+
+	mockPort := &MockPort{}
+
+	mockSessionRegistry := &MockSessionRegistry{}
+	mockSessionRegistry.On("Remove", mock.Anything).Return()
+
+	mockSSHChannel := &MockSSHChannel{}
+	mockSSHChannel.On("Close").Return(nil)
+
+	mockLifecycle := New(mockSSHConn, mockForwarder, mockSlug, mockPort, mockSessionRegistry, "mas-fuad")
+	mockLifecycle.SetStatus(types.SessionStatusRUNNING)
+	err := mockLifecycle.SetChannel(mockSSHChannel)
+	assert.NoError(t, err)
+
+	const numGoroutines = 10
+	var wg sync.WaitGroup
+	errChan := make(chan error, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := mockLifecycle.Close()
+			errChan <- err
+		}()
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	for err := range errChan {
+		assert.NoError(t, err)
+	}
+
+	assert.False(t, mockLifecycle.IsActive())
+}
+
+func TestLifecycle_SetChannel_AfterClose(t *testing.T) {
+	mockSSHConn := new(MockSSHConn)
+	mockSSHConn.On("Close").Return(nil)
+	mockForwarder := &MockForwarder{}
+	mockForwarder.On("TunnelType").Return(types.TunnelTypeHTTP)
+	mockSlug := &MockSlug{}
+	mockSlug.On("String").Return("test-slug")
+	mockPort := &MockPort{}
+	mockSessionRegistry := &MockSessionRegistry{}
+	mockSessionRegistry.On("Remove", mock.Anything).Return()
+	mockSSHChannel := &MockSSHChannel{}
+	mockSSHChannel.On("Close").Return(nil)
+
+	mockLifecycle := New(mockSSHConn, mockForwarder, mockSlug, mockPort, mockSessionRegistry, "mas-fuad")
+	mockLifecycle.SetStatus(types.SessionStatusRUNNING)
+	err := mockLifecycle.SetChannel(mockSSHChannel)
+	assert.NoError(t, err)
+
+	err = mockLifecycle.Close()
+	assert.NoError(t, err)
+
+	anotherChannel := &MockSSHChannel{}
+	err = mockLifecycle.SetChannel(anotherChannel)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "lifecycle is closed")
+}
+
+func TestLifecycle_SetChannel_Nil(t *testing.T) {
+	mockSSHConn := new(MockSSHConn)
+	mockForwarder := &MockForwarder{}
+	mockSlug := &MockSlug{}
+	mockPort := &MockPort{}
+	mockSessionRegistry := &MockSessionRegistry{}
+
+	mockLifecycle := New(mockSSHConn, mockForwarder, mockSlug, mockPort, mockSessionRegistry, "mas-fuad")
+
+	err := mockLifecycle.SetChannel(nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "channel cannot be nil")
+}
+
+func TestLifecycle_SetStatus_AfterClose(t *testing.T) {
+	mockSSHConn := new(MockSSHConn)
+	mockSSHConn.On("Close").Return(nil)
+	mockForwarder := &MockForwarder{}
+	mockForwarder.On("TunnelType").Return(types.TunnelTypeHTTP)
+	mockSlug := &MockSlug{}
+	mockSlug.On("String").Return("test-slug")
+	mockPort := &MockPort{}
+	mockSessionRegistry := &MockSessionRegistry{}
+	mockSessionRegistry.On("Remove", mock.Anything).Return()
+	mockSSHChannel := &MockSSHChannel{}
+	mockSSHChannel.On("Close").Return(nil)
+
+	mockLifecycle := New(mockSSHConn, mockForwarder, mockSlug, mockPort, mockSessionRegistry, "mas-fuad")
+	mockLifecycle.SetStatus(types.SessionStatusRUNNING)
+	err := mockLifecycle.SetChannel(mockSSHChannel)
+	assert.NoError(t, err)
+
+	err = mockLifecycle.Close()
+	assert.NoError(t, err)
+	assert.False(t, mockLifecycle.IsActive())
+
+	mockLifecycle.SetStatus(types.SessionStatusRUNNING)
+	assert.False(t, mockLifecycle.IsActive(), "SetStatus should be ignored after Close")
 }
