@@ -164,7 +164,9 @@ func (s *session) setupInteractiveMode(channel ssh.NewChannel) error {
 		}
 	}()
 
-	s.lifecycle.SetChannel(ch)
+	if err = s.lifecycle.SetChannel(ch); err != nil {
+		return err
+	}
 	s.interaction.SetChannel(ch)
 	s.interaction.SetMode(types.InteractiveModeINTERACTIVE)
 

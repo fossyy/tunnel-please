@@ -1922,10 +1922,6 @@ func TestInteraction_Start_ProtocolSelection(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 
 			i := mockInteraction.(*interaction)
-			if i.program != nil {
-				assert.NotNil(t, i.program, "program should be initialized")
-			}
-
 			i.Stop()
 
 			mockConfig.AssertExpectations(t)

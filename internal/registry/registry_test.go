@@ -4,7 +4,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-	"tunnel_pls/internal/port"
 	"tunnel_pls/internal/session/forwarder"
 	"tunnel_pls/internal/session/interaction"
 	"tunnel_pls/internal/session/lifecycle"
@@ -78,15 +77,15 @@ func (ml *mockLifecycle) Connection() ssh.Conn {
 	return args.Get(0).(ssh.Conn)
 }
 
-func (ml *mockLifecycle) PortRegistry() port.Port {
+func (ml *mockLifecycle) PortRegistry() lifecycle.PortRegistry {
 	args := ml.Called()
 	if args.Get(0) == nil {
 		return nil
 	}
-	return args.Get(0).(port.Port)
+	return args.Get(0).(lifecycle.PortRegistry)
 }
 
-func (ml *mockLifecycle) SetChannel(channel ssh.Channel)       { ml.Called(channel) }
+func (ml *mockLifecycle) SetChannel(channel ssh.Channel) error { return ml.Called(channel).Error(0) }
 func (ml *mockLifecycle) SetStatus(status types.SessionStatus) { ml.Called(status) }
 func (ml *mockLifecycle) IsActive() bool                       { return ml.Called().Bool(0) }
 func (ml *mockLifecycle) StartedAt() time.Time                 { return ml.Called().Get(0).(time.Time) }
