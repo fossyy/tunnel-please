@@ -158,7 +158,7 @@ func (s *session) setupInteractiveMode(channel ssh.NewChannel) error {
 	}
 
 	go func() {
-		err = s.HandleGlobalRequest(reqs)
+		err := s.HandleGlobalRequest(reqs)
 		if err != nil {
 			log.Printf("global request handler error: %v", err)
 		}
@@ -200,23 +200,22 @@ func (s *session) waitForSessionEnd() error {
 }
 
 func (s *session) waitForTCPIPForward() *ssh.Request {
-	select {
-	case req, ok := <-s.initialReq:
-		if !ok {
-			log.Println("Forwarding request channel closed")
+	for {
+		select {
+		case req, ok := <-s.initialReq:
+			if !ok {
+				log.Println("Forwarding request channel closed")
+				return nil
+			}
+			if req.Type == "tcpip-forward" {
+				return req
+			}
+			log.Printf("Ignoring unexpected global request: %s", req.Type)
+			_ = req.Reply(false, nil)
+		case <-time.After(500 * time.Millisecond):
+			log.Println("No tcpip-forward request received within timeout")
 			return nil
 		}
-		if req.Type == "tcpip-forward" {
-			return req
-		}
-		if err := req.Reply(false, nil); err != nil {
-			log.Printf("Failed to reply to request: %v", err)
-		}
-		log.Printf("Expected tcpip-forward request, got: %s", req.Type)
-		return nil
-	case <-time.After(500 * time.Millisecond):
-		log.Println("No forwarding request received")
-		return nil
 	}
 }
 
@@ -379,8 +378,7 @@ func (s *session) HandleTCPForward(req *ssh.Request, addr string, portToBind uin
 	}
 
 	go func() {
-		err = tcpServer.Serve(listener)
-		if err != nil {
+		if err := tcpServer.Serve(listener); err != nil {
 			log.Printf("Failed serving tcp server: %s\n", err)
 		}
 	}()
