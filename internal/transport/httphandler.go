@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -52,25 +53,43 @@ func (hh *httpHandler) badRequest(conn net.Conn) error {
 	return nil
 }
 
+func readHTTPHeader(br *bufio.Reader, limit int) ([]byte, error) {
+	var headerBuf []byte
+	for {
+		line, err := br.ReadSlice('\n')
+		headerBuf = append(headerBuf, line...)
+		if errors.Is(err, bufio.ErrBufferFull) {
+			if len(headerBuf) > limit {
+				return nil, fmt.Errorf("headers too large")
+			}
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if bytes.HasSuffix(headerBuf, []byte("\r\n\r\n")) {
+			return headerBuf, nil
+		}
+		if len(headerBuf) > limit {
+			return nil, fmt.Errorf("headers too large")
+		}
+	}
+}
+
 func (hh *httpHandler) Handler(conn net.Conn, isTLS bool) {
 	defer hh.closeConnection(conn)
 
 	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	buf := make([]byte, hh.config.HeaderSize())
-	n, err := conn.Read(buf)
+	br := bufio.NewReaderSize(conn, hh.config.HeaderSize())
+	headerBuf, err := readHTTPHeader(br, hh.config.HeaderSize())
 	if err != nil {
-		_ = hh.badRequest(conn)
-		return
-	}
-
-	if idx := bytes.Index(buf[:n], []byte("\r\n\r\n")); idx == -1 {
 		_ = hh.badRequest(conn)
 		return
 	}
 
 	_ = conn.SetReadDeadline(time.Time{})
 
-	reqhf, err := header.NewRequest(buf[:n])
+	reqhf, err := header.NewRequest(headerBuf)
 	if err != nil {
 		log.Printf("Error creating request header: %v", err)
 		_ = hh.badRequest(conn)
@@ -101,7 +120,7 @@ func (hh *httpHandler) Handler(conn net.Conn, isTLS bool) {
 		return
 	}
 
-	hw := stream.New(conn, conn, conn.RemoteAddr())
+	hw := stream.New(conn, br, conn.RemoteAddr())
 	defer func(hw stream.HTTP) {
 		err = hw.Close()
 		if err != nil {
