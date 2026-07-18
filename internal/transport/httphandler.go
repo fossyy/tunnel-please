@@ -56,8 +56,14 @@ func (hh *httpHandler) badRequest(conn net.Conn) error {
 func readHTTPHeader(br *bufio.Reader, limit int) ([]byte, error) {
 	var headerBuf []byte
 	for {
-		line, err := br.ReadBytes('\n')
+		line, err := br.ReadSlice('\n')
 		headerBuf = append(headerBuf, line...)
+		if errors.Is(err, bufio.ErrBufferFull) {
+			if len(headerBuf) > limit {
+				return nil, fmt.Errorf("headers too large")
+			}
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
