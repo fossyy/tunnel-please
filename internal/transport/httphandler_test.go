@@ -321,8 +321,14 @@ func TestHandler(t *testing.T) {
 			isTLS:       false,
 			redirectTLS: false,
 			request:     []byte(""),
-			expected:    []byte("HTTP/1.1 400 Bad Request\r\n\r\n"),
-			setupMocks: func(msr *MockSessionRegistry) {
+			expected:    []byte(""),
+			setupConn: func() (net.Conn, net.Conn) {
+				mc := new(MockConn)
+				mc.ReadBuffer = bytes.NewBuffer(nil)
+				mc.On("SetReadDeadline", mock.Anything).Return(nil)
+				mc.On("Write", []byte("HTTP/1.1 400 Bad Request\r\n\r\n")).Return(0, nil)
+				mc.On("Close").Return(nil)
+				return mc, nil
 			},
 		},
 		{
@@ -714,4 +720,114 @@ func TestHandler(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandlerForwardsPostBody(t *testing.T) {
+	mockSessionRegistry := new(MockSessionRegistry)
+	mockConfig := &MockConfig{}
+	mockConfig.On("Domain").Return("example.com")
+	mockConfig.On("HTTPPort").Return("0")
+	mockConfig.On("HeaderSize").Return(4096)
+	mockConfig.On("TLSRedirect").Return(true)
+	hh := &httpHandler{
+		sessionRegistry: mockSessionRegistry,
+		config:          mockConfig,
+	}
+
+	mockSession := new(MockSession)
+	mockForwarder := new(MockForwarder)
+	mockSSHChannel := new(MockSSHChannel)
+
+	mockSessionRegistry.On("Get", types.SessionKey{
+		Id:   "test",
+		Type: types.TunnelTypeHTTP,
+	}).Return(mockSession, nil)
+	mockSession.On("Forwarder").Return(mockForwarder)
+
+	reqCh := make(chan *ssh.Request)
+	mockForwarder.On("OpenForwardedChannel", mock.Anything, mock.Anything).Return(mockSSHChannel, (<-chan *ssh.Request)(reqCh), nil)
+
+	var mu sync.Mutex
+	var capturedHeaders []byte
+	mockSSHChannel.On("Write", mock.Anything).Run(func(args mock.Arguments) {
+		mu.Lock()
+		capturedHeaders = append(capturedHeaders, args.Get(0).([]byte)...)
+		mu.Unlock()
+	}).Return(0, nil)
+	mockSSHChannel.On("Close").Return(nil)
+
+	bodyChan := make(chan string, 1)
+	mockForwarder.On("HandleConnection", mock.Anything, mockSSHChannel).Run(func(args mock.Arguments) {
+		w := args.Get(0).(io.ReadWriter)
+		buf := make([]byte, len("hello=world"))
+		if _, err := io.ReadFull(w, buf); err != nil {
+			bodyChan <- ""
+		} else {
+			bodyChan <- string(buf)
+		}
+		_, _ = w.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"))
+	})
+
+	go func() {
+		for range reqCh {
+		}
+	}()
+
+	serverConn, clientConn := net.Pipe()
+	defer func() {
+		_ = clientConn.Close()
+	}()
+
+	remoteAddr, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:12345")
+	wrappedServerConn := &wrappedConn{Conn: serverConn, remoteAddr: remoteAddr}
+
+	go hh.Handler(wrappedServerConn, true)
+
+	request := []byte("POST / HTTP/1.1\r\nHost: test.domain\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 11\r\n\r\nhello=world")
+	go func() {
+		_, _ = clientConn.Write(request)
+	}()
+
+	var response []byte
+	respDone := make(chan struct{})
+	go func() {
+		defer close(respDone)
+		buf := make([]byte, 4096)
+		for {
+			n, err := clientConn.Read(buf)
+			if err != nil {
+				break
+			}
+			response = append(response, buf[:n]...)
+			if bytes.Contains(response, []byte("\r\n\r\nok")) {
+				break
+			}
+		}
+	}()
+
+	select {
+	case body := <-bodyChan:
+		assert.Equal(t, "hello=world", body)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for forwarded body")
+	}
+
+	select {
+	case <-respDone:
+		resStr := string(response)
+		assert.True(t, strings.HasPrefix(resStr, "HTTP/1.1 200 OK\r\n"))
+		assert.Contains(t, resStr, "Server: Tunnel Please\r\n")
+		assert.True(t, strings.HasSuffix(resStr, "\r\n\r\nok"))
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for response")
+	}
+
+	mu.Lock()
+	hdrStr := string(capturedHeaders)
+	mu.Unlock()
+	assert.Contains(t, hdrStr, "POST / HTTP/1.1\r\n")
+	assert.Contains(t, hdrStr, "Content-Length: 11\r\n")
+	assert.Contains(t, hdrStr, "X-Forwarded-For: 127.0.0.1\r\n")
+
+	mockSessionRegistry.AssertExpectations(t)
 }
