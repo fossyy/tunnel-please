@@ -363,19 +363,28 @@ func (s *session) HandleTCPForward(req *ssh.Request, addr string, portToBind uin
 		}
 	}
 
+	releasePort := func() {
+		if err := s.lifecycle.PortRegistry().SetStatus(portToBind, false); err != nil {
+			log.Printf("failed to release port %d: %v", portToBind, err)
+		}
+	}
+
 	tcpServer := transport.NewTCPServer(portToBind, s.forwarder)
 	listener, err := tcpServer.Listen()
 	if err != nil {
+		releasePort()
 		return s.denyForwardingRequest(req, nil, listener, fmt.Sprintf("Port %d is already in use or restricted", portToBind))
 	}
 
 	key := types.SessionKey{Id: fmt.Sprintf("%d", portToBind), Type: types.TunnelTypeTCP}
 	if !s.registry.Register(key, s) {
+		releasePort()
 		return s.denyForwardingRequest(req, nil, listener, fmt.Sprintf("Failed to register TunnelTypeTCP client with id: %s", key.Id))
 	}
 
 	err = s.finalizeForwarding(req, portToBind, listener, types.TunnelTypeTCP, key.Id)
 	if err != nil {
+		releasePort()
 		return s.denyForwardingRequest(req, &key, listener, fmt.Sprintf("Failed to finalize forwarding: %s", err))
 	}
 
