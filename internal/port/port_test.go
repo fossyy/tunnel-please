@@ -16,6 +16,8 @@ func TestAddRange(t *testing.T) {
 		{"normal range", 1000, 1002, false},
 		{"invalid range", 2000, 1999, true},
 		{"single port range", 3000, 3000, false},
+		{"range ending at max uint16", 65533, 65535, false},
+		{"range including port zero", 0, 2, false},
 	}
 
 	for _, tt := range tests {
@@ -29,6 +31,22 @@ func TestAddRange(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAddRangeBoundaries(t *testing.T) {
+	pm := New()
+	err := pm.AddRange(0, 3)
+	assert.NoError(t, err)
+	_, hasZero := pm.(*port).ports[0]
+	assert.False(t, hasZero, "port 0 must be skipped")
+	assert.Len(t, pm.(*port).ports, 3)
+
+	pm2 := New()
+	err = pm2.AddRange(65533, 65535)
+	assert.NoError(t, err)
+	assert.Len(t, pm2.(*port).ports, 3)
+	_, hasMax := pm2.(*port).ports[65535]
+	assert.True(t, hasMax)
 }
 
 func TestUnassigned(t *testing.T) {
@@ -58,6 +76,21 @@ func TestUnassigned(t *testing.T) {
 	}
 }
 
+func TestUnassignedReservesPort(t *testing.T) {
+	pm := New()
+	_ = pm.AddRange(1000, 1002)
+
+	p1, ok1 := pm.Unassigned()
+	assert.True(t, ok1)
+	assert.Equal(t, uint16(1000), p1)
+
+	p2, ok2 := pm.Unassigned()
+	assert.True(t, ok2)
+	assert.Equal(t, uint16(1001), p2)
+
+	assert.True(t, pm.(*port).ports[1000], "Unassigned must reserve the port")
+}
+
 func TestSetStatus(t *testing.T) {
 	pm := New()
 	_ = pm.AddRange(1000, 1002)
@@ -83,6 +116,17 @@ func TestSetStatus(t *testing.T) {
 	}
 }
 
+func TestSetStatusUnknownPort(t *testing.T) {
+	pm := New()
+	_ = pm.AddRange(1000, 1002)
+
+	err := pm.SetStatus(5000, true)
+	assert.Error(t, err)
+
+	_, exists := pm.(*port).ports[5000]
+	assert.False(t, exists, "SetStatus must not create entries for unknown ports")
+}
+
 func TestClaim(t *testing.T) {
 	pm := New()
 	_ = pm.AddRange(1000, 1002)
@@ -95,7 +139,7 @@ func TestClaim(t *testing.T) {
 	}{
 		{"claim unassigned port", 1000, false, true},
 		{"claim already assigned port", 1001, true, false},
-		{"claim non-existent port", 5000, false, true},
+		{"claim non-existent port", 5000, false, false},
 	}
 
 	for _, tt := range tests {
@@ -107,8 +151,13 @@ func TestClaim(t *testing.T) {
 			got := pm.Claim(tt.port)
 			assert.Equal(t, tt.want, got)
 
-			finalState := pm.(*port).ports[tt.port]
-			assert.True(t, finalState)
+			finalState, exists := pm.(*port).ports[tt.port]
+			if !tt.want && tt.port == 5000 {
+				assert.False(t, exists, "out-of-range port must not be added to the registry")
+			} else {
+				assert.True(t, exists)
+				assert.True(t, finalState)
+			}
 		})
 	}
 }
