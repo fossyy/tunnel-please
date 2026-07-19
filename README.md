@@ -36,6 +36,7 @@ The following environment variables can be configured in the `.env` file:
 | Variable            | Description                                                                 | Default                 | Required            |
 |---------------------|-----------------------------------------------------------------------------|-------------------------|---------------------|
 | `DOMAIN`            | Domain name for subdomain routing                                           | `localhost`             | No                  |
+| `FRONTEND_URL`      | URL for the frontend dashboard/landing page                                 | `https://<DOMAIN>`      | No                  |
 | `PORT`              | SSH server port                                                             | `2200`                  | No                  |
 | `HTTP_PORT`         | HTTP server port                                                            | `8080`                  | No                  |
 | `HTTPS_PORT`        | HTTPS server port                                                           | `8443`                  | No                  |

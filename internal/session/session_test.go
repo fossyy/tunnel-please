@@ -38,8 +38,9 @@ type mockConfig struct {
 	config.Config
 }
 
-func (m *mockConfig) Domain() string  { return m.Called().String(0) }
-func (m *mockConfig) SSHPort() string { return m.Called().String(0) }
+func (m *mockConfig) Domain() string            { return m.Called().String(0) }
+func (m *mockConfig) FrontendURL() string       { return m.Called().String(0) }
+func (m *mockConfig) SSHPort() string           { return m.Called().String(0) }
 func (m *mockConfig) Mode() types.ServerMode {
 	args := m.Called()
 	if args.Get(0) == nil {

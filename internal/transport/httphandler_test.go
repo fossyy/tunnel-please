@@ -223,6 +223,7 @@ func TestNewHTTPHandler(t *testing.T) {
 	msr := new(MockSessionRegistry)
 	mockConfig := &MockConfig{}
 	mockConfig.On("Domain").Return("domain")
+	mockConfig.On("FrontendURL").Return("https://domain")
 	mockConfig.On("TLSRedirect").Return(false)
 	hh := newHTTPHandler(mockConfig, msr)
 	assert.NotNil(t, hh)
@@ -290,7 +291,7 @@ func TestHandler(t *testing.T) {
 			isTLS:       true,
 			redirectTLS: false,
 			request:     []byte("GET / HTTP/1.1\r\nHost: test.domain\r\n\r\n"),
-			expected:    []byte("HTTP/1.1 301 Moved Permanently\r\nLocation: https://tunnl.live/tunnel-not-found?slug=test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+			expected:    []byte("HTTP/1.1 301 Moved Permanently\r\nLocation: https://example.com/tunnel-not-found?slug=test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
 			setupMocks: func(msr *MockSessionRegistry) {
 				msr.On("Get", types.SessionKey{
 					Id:   "test",
@@ -616,6 +617,7 @@ func TestHandler(t *testing.T) {
 			mockConfig := &MockConfig{}
 			port := "0"
 			mockConfig.On("Domain").Return("example.com")
+			mockConfig.On("FrontendURL").Return("https://example.com")
 			mockConfig.On("HTTPPort").Return(port)
 			mockConfig.On("HeaderSize").Return(4096)
 			mockConfig.On("TLSRedirect").Return(true)
@@ -726,6 +728,7 @@ func TestHandlerForwardsPostBody(t *testing.T) {
 	mockSessionRegistry := new(MockSessionRegistry)
 	mockConfig := &MockConfig{}
 	mockConfig.On("Domain").Return("example.com")
+	mockConfig.On("FrontendURL").Return("https://example.com")
 	mockConfig.On("HTTPPort").Return("0")
 	mockConfig.On("HeaderSize").Return(4096)
 	mockConfig.On("TLSRedirect").Return(true)

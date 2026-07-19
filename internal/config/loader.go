@@ -12,8 +12,9 @@ import (
 )
 
 type config struct {
-	domain  string
-	sshPort string
+	domain      string
+	frontendURL string
+	sshPort     string
 
 	httpPort  string
 	httpsPort string
@@ -49,6 +50,7 @@ func parse() (*config, error) {
 	}
 
 	domain := getenv("DOMAIN", "localhost")
+	frontendURL := getenv("FRONTEND_URL", "https://"+domain)
 	sshPort := getenv("PORT", "2200")
 
 	httpPort := getenv("HTTP_PORT", "8080")
@@ -89,6 +91,7 @@ func parse() (*config, error) {
 
 	return &config{
 		domain:            domain,
+		frontendURL:       frontendURL,
 		sshPort:           sshPort,
 		httpPort:          httpPort,
 		httpsPort:         httpsPort,

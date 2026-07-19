@@ -6,6 +6,7 @@ import (
 
 type Config interface {
 	Domain() string
+	FrontendURL() string
 	SSHPort() string
 
 	HTTPPort() string
@@ -50,6 +51,7 @@ func MustLoad() (Config, error) {
 }
 
 func (c *config) Domain() string            { return c.domain }
+func (c *config) FrontendURL() string       { return c.frontendURL }
 func (c *config) SSHPort() string           { return c.sshPort }
 func (c *config) HTTPPort() string          { return c.httpPort }
 func (c *config) HTTPSPort() string         { return c.httpsPort }

@@ -116,7 +116,7 @@ func (hh *httpHandler) Handler(conn net.Conn, isTLS bool) {
 		Type: types.TunnelTypeHTTP,
 	})
 	if err != nil {
-		_ = hh.redirect(conn, http.StatusMovedPermanently, fmt.Sprintf("https://tunnl.live/tunnel-not-found?slug=%s\r\n", slug))
+		_ = hh.redirect(conn, http.StatusMovedPermanently, fmt.Sprintf("%s/tunnel-not-found?slug=%s\r\n", hh.config.FrontendURL(), slug))
 		return
 	}
 
