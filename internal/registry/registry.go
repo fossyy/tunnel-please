@@ -94,12 +94,12 @@ func (r *registry) Update(user string, oldKey, newKey Key) error {
 		return ErrInvalidSlug
 	}
 
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if _, exists := r.slugIndex[newKey]; exists && newKey != oldKey {
 		return ErrSlugInUse
 	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	client, ok := r.byUser[user][oldKey]
 	if !ok {

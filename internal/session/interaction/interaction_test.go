@@ -32,6 +32,7 @@ type MockConfig struct {
 }
 
 func (m *MockConfig) Domain() string            { return m.Called().String(0) }
+func (m *MockConfig) FrontendURL() string       { return m.Called().String(0) }
 func (m *MockConfig) SSHPort() string           { return m.Called().String(0) }
 func (m *MockConfig) HTTPPort() string          { return m.Called().String(0) }
 func (m *MockConfig) HTTPSPort() string         { return m.Called().String(0) }
