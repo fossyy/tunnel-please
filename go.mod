@@ -12,7 +12,7 @@ require (
 	github.com/libdns/cloudflare v0.2.2
 	github.com/muesli/termenv v0.16.0
 	github.com/stretchr/testify v1.12.1
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
 )
