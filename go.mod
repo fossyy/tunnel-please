@@ -1,11 +1,11 @@
 module tunnel_pls
 
-go 1.26.0
+go 1.26.7
 
 require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.1.1
-	charm.land/lipgloss/v2 v2.0.6
+	charm.land/lipgloss/v2 v2.1.0
 	git.fossy.my.id/bagas/tunnel-please-grpc v1.5.0
 	github.com/caddyserver/certmagic v0.25.6
 	github.com/charmbracelet/colorprofile v0.4.3
