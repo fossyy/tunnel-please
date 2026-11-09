@@ -1,5 +1,6 @@
-FROM golang:1.27.3-alpine AS go_builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS go_builder
 
+ARG TARGETARCH
 ARG VERSION=dev
 ARG BUILD_DATE=unknown
 ARG COMMIT=unknown
@@ -20,7 +21,7 @@ COPY . .
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -trimpath \
     -ldflags="-w -s \
     	-X tunnel_pls/internal/version.Version=${VERSION} \
