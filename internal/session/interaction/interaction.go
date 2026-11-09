@@ -284,7 +284,8 @@ func (i *interaction) Start() {
 	i.program = tea.NewProgram(
 		m,
 		tea.WithInput(i.channel),
-		tea.WithOutput(i.channel),
+		// The channel is not a tty, so nothing turns v2's bare \n into \r\n.
+		tea.WithOutput(crlfWriter{dst: i.channel}),
 		tea.WithWindowSize(w, h),
 		tea.WithColorProfile(colorprofile.TrueColor),
 		tea.WithoutSignals(),
