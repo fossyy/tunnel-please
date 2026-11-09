@@ -236,7 +236,24 @@ func (s *session) handleWindowChange(req *ssh.Request) error {
 func (s *session) HandleGlobalRequest(GlobalRequest <-chan *ssh.Request) error {
 	for req := range GlobalRequest {
 		switch req.Type {
-		case "shell", "pty-req":
+		case "pty-req":
+			// RFC 4254 6.2 carries the client's terminal size; capturing it now
+			// means the TUI draws at the right size on its first frame instead of
+			// waiting for a window-change the client may never send.
+			var pty struct {
+				Term               string
+				Columns, Rows      uint32
+				WidthPixels        uint32
+				HeightPixels       uint32
+				TerminalAttributes string
+			}
+			if err := ssh.Unmarshal(req.Payload, &pty); err == nil && pty.Columns > 0 && pty.Rows > 0 {
+				s.interaction.SetWH(int(pty.Columns), int(pty.Rows))
+			}
+			if err := req.Reply(true, nil); err != nil {
+				return err
+			}
+		case "shell":
 			if err := req.Reply(true, nil); err != nil {
 				return err
 			}

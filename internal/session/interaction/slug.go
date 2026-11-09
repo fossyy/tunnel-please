@@ -5,13 +5,13 @@ import (
 	"strings"
 	"tunnel_pls/internal/types"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
-func (m *model) slugUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *model) slugUpdate(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	if m.tunnelType != types.TunnelTypeHTTP {
@@ -72,7 +72,7 @@ func (m *model) slugView() string {
 	b.WriteString(m.renderSlugPreview(isVeryCompact))
 	b.WriteString(m.renderSlugHelp(isVeryCompact))
 
-	return b.String()
+	return joinSections(b.String())
 }
 
 func (m *model) renderSlugTitle(isVeryCompact bool) string {

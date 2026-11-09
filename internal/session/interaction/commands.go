@@ -4,10 +4,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func (m *model) handleCommandSelection(item commandItem) (tea.Model, tea.Cmd) {
@@ -28,7 +28,7 @@ func (m *model) handleCommandSelection(item commandItem) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m *model) commandsUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *model) commandsUpdate(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch {
@@ -82,5 +82,5 @@ func (m *model) commandsView() string {
 	}
 	b.WriteString(helpStyle.Render(helpText))
 
-	return b.String()
+	return joinSections(b.String())
 }

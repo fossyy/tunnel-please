@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
-func (m *model) dashboardUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *model) dashboardUpdate(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keymap.quit):
 		m.quitting = true
@@ -25,13 +25,12 @@ func (m *model) dashboardUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *model) dashboardView() string {
 	isCompact := shouldUseCompactLayout(m.width, BreakpointLarge)
 
-	var b strings.Builder
-	b.WriteString(m.renderHeader(isCompact))
-	b.WriteString(m.renderUserInfo(isCompact))
-	b.WriteString(m.renderQuickActions(isCompact))
-	b.WriteString(m.renderFooter(isCompact))
-
-	return b.String()
+	return joinSections(
+		m.renderHeader(isCompact),
+		m.renderUserInfo(isCompact),
+		m.renderQuickActions(isCompact),
+		m.renderFooter(isCompact),
+	)
 }
 
 func (m *model) renderHeader(isCompact bool) string {
@@ -86,7 +85,7 @@ func (m *model) renderSubtitle() string {
 		Italic(true)
 
 	return subtitleStyle.Render("Secure tunnel service by Bagas • ") +
-		urlStyle.Render("https://fossy.my.id") + "\n\n"
+		urlStyle.Render("https://fossy.my.id")
 }
 
 func (m *model) renderUserInfo(isCompact bool) string {
