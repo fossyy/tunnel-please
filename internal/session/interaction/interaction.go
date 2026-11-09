@@ -9,13 +9,12 @@ import (
 	"tunnel_pls/internal/session/slug"
 	"tunnel_pls/internal/types"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -129,9 +128,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.commandList.SetHeight(msg.Height - 4)
 
 		if msg.Width < 80 {
-			m.slugInput.Width = msg.Width - 10
+			m.slugInput.SetWidth(msg.Width - 10)
 		} else {
-			m.slugInput.Width = 50
+			m.slugInput.SetWidth(50)
 		}
 		return m, nil
 
@@ -139,7 +138,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Batch(tea.ClearScreen, textinput.Blink, tea.Quit)
 
-	case tea.KeyMsg:
+	case tea.PasteMsg:
+		// v1 delivered pastes as KeyMsg; v2 uses its own message.
+		if m.editingSlug {
+			var cmd tea.Cmd
+			m.slugInput, cmd = m.slugInput.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+
+	case tea.KeyPressMsg:
 		if m.showingComingSoon {
 			return m.comingSoonUpdate(msg)
 		}
@@ -164,7 +172,14 @@ func (i *interaction) Redraw() {
 	}
 }
 
-func (m *model) View() string {
+func (m *model) View() tea.View {
+	v := tea.NewView(m.viewContent())
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
+}
+
+func (m *model) viewContent() string {
 	if m.quitting {
 		return ""
 	}
@@ -188,7 +203,6 @@ func (i *interaction) Start() {
 	if i.mode == types.InteractiveModeHEADLESS {
 		return
 	}
-	lipgloss.SetColorProfile(termenv.TrueColor)
 
 	protocol := "http"
 	if i.config.TLSEnabled() {
@@ -216,7 +230,7 @@ func (i *interaction) Start() {
 	ti := textinput.New()
 	ti.Placeholder = "my-custom-slug"
 	ti.CharLimit = 20
-	ti.Width = 50
+	ti.SetWidth(50)
 
 	m := &model{
 		randomizer:  i.randomizer,
@@ -249,8 +263,7 @@ func (i *interaction) Start() {
 		m,
 		tea.WithInput(i.channel),
 		tea.WithOutput(i.channel),
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
+		tea.WithColorProfile(colorprofile.TrueColor),
 		tea.WithoutSignals(),
 		tea.WithoutSignalHandler(),
 		tea.WithFPS(30),

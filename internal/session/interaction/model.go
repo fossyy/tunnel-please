@@ -2,15 +2,16 @@ package interaction
 
 import (
 	"fmt"
+	"strings"
 	"time"
 	"tunnel_pls/internal/random"
 	"tunnel_pls/internal/types"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 )
 
 type commandItem struct {
@@ -77,7 +78,22 @@ type keymap struct {
 type tickMsg time.Time
 
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, tea.WindowSize())
+	return tea.Batch(textinput.Blink, tea.RequestWindowSize)
+}
+
+func joinSections(sections ...string) string {
+	var b strings.Builder
+	for _, section := range sections {
+		section = strings.TrimRight(section, "\n")
+		if section == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(section)
+	}
+	return b.String()
 }
 
 func getResponsiveWidth(screenWidth, padding, minWidth, maxWidth int) int {
