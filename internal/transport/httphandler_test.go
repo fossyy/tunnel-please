@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -273,7 +274,7 @@ func TestHandler(t *testing.T) {
 			isTLS:       false,
 			redirectTLS: true,
 			request:     []byte("GET / HTTP/1.1\r\nHost: tunnel.example.com\r\n\r\n"),
-			expected:    []byte("HTTP/1.1 301 Moved Permanently\r\nLocation: https://tunnel.example.com/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+			expected:    []byte("HTTP/1.1 301 Moved Permanently\r\nLocation: https://tunnel.example.com/\r\nCache-Control: no-store\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
 			setupMocks: func(msr *MockSessionRegistry) {
 			},
 		},
@@ -291,7 +292,7 @@ func TestHandler(t *testing.T) {
 			isTLS:       true,
 			redirectTLS: false,
 			request:     []byte("GET / HTTP/1.1\r\nHost: test.domain\r\n\r\n"),
-			expected:    []byte("HTTP/1.1 301 Moved Permanently\r\nLocation: https://example.com/tunnel-not-found?slug=test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+			expected:    []byte("HTTP/1.1 302 Found\r\nLocation: https://example.com/tunnel-not-found?slug=test\r\nCache-Control: no-store\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
 			setupMocks: func(msr *MockSessionRegistry) {
 				msr.On("Get", types.SessionKey{
 					Id:   "test",
@@ -833,4 +834,29 @@ func TestHandlerForwardsPostBody(t *testing.T) {
 	assert.Contains(t, hdrStr, "X-Forwarded-For: 127.0.0.1\r\n")
 
 	mockSessionRegistry.AssertExpectations(t)
+}
+
+func TestRedirectStatusLine(t *testing.T) {
+	hh := &httpHandler{}
+
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+
+	go func() {
+		_ = hh.redirect(serverConn, http.StatusFound, "https://example.com/tunnel-not-found?slug=test")
+		_ = serverConn.Close()
+	}()
+
+	buf := make([]byte, 64)
+	if err := clientConn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	n, err := clientConn.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A cached redirect makes a reused slug fail for the visitor that saw it
+	// while it was free, and the reason text must name the status sent.
+	assert.True(t, strings.HasPrefix(string(buf[:n]), "HTTP/1.1 302 Found\r\n"))
 }

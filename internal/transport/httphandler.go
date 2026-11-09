@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"tunnel_pls/internal/config"
@@ -35,8 +36,9 @@ func newHTTPHandler(config config.Config, sessionRegistry registry.Registry) *ht
 }
 
 func (hh *httpHandler) redirect(conn net.Conn, status int, location string) error {
-	_, err := conn.Write([]byte(fmt.Sprintf("HTTP/1.1 %d Moved Permanently\r\n", status) +
+	_, err := conn.Write([]byte(fmt.Sprintf("HTTP/1.1 %d %s\r\n", status, http.StatusText(status)) +
 		fmt.Sprintf("Location: %s", location) +
+		"Cache-Control: no-store\r\n" +
 		"Content-Length: 0\r\n" +
 		"Connection: close\r\n" +
 		"\r\n"))
@@ -116,7 +118,7 @@ func (hh *httpHandler) Handler(conn net.Conn, isTLS bool) {
 		Type: types.TunnelTypeHTTP,
 	})
 	if err != nil {
-		_ = hh.redirect(conn, http.StatusMovedPermanently, fmt.Sprintf("%s/tunnel-not-found?slug=%s\r\n", hh.config.FrontendURL(), slug))
+		_ = hh.redirect(conn, http.StatusFound, fmt.Sprintf("%s/tunnel-not-found?slug=%s\r\n", hh.config.FrontendURL(), url.QueryEscape(slug)))
 		return
 	}
 
