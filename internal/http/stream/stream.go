@@ -26,23 +26,39 @@ type HTTP interface {
 	ApplyRequestMiddlewares(reqhf header.RequestHeader) error
 }
 
+// http is used by two goroutines at once: one copies client to app (Read) and
+// one app to client (Write). Request and response state never mix.
 type http struct {
 	remoteAddr net.Addr
 	writer     io.Writer
 	reader     io.Reader
-	buf        []byte
+
+	// Response side (Write).
+	buf       []byte
+	maxHeader int
+	// bodyLeft is how many body bytes the last response still owes: its
+	// declared Content-Length minus what went out. While > 0 the next bytes are
+	// body, never a header block, so they are written straight through.
+	bodyLeft   int
 	respHeader header.ResponseHeader
-	reqHeader  header.RequestHeader
-	respMW     []middleware.ResponseMiddleware
-	reqMW      []middleware.RequestMiddleware
+
+	// Request side (Read).
+	reqHeader header.RequestHeader
+	req       reqState
+
+	respMW []middleware.ResponseMiddleware
+	reqMW  []middleware.RequestMiddleware
 }
 
-func New(writer io.Writer, reader io.Reader, remoteAddr net.Addr) HTTP {
+// New takes the largest header it should hold while looking for the end of a
+// header block, and the largest header it should buffer from the app's side.
+func New(writer io.Writer, reader io.Reader, remoteAddr net.Addr, maxHeader int) HTTP {
 	return &http{
 		remoteAddr: remoteAddr,
 		writer:     writer,
 		reader:     reader,
 		buf:        make([]byte, 0, 4096),
+		maxHeader:  maxHeader,
 	}
 }
 

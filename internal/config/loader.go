@@ -135,7 +135,9 @@ func parseMode() (types.ServerMode, error) {
 
 func parseAllowedPorts() (uint16, uint16, error) {
 	raw := getenv("ALLOWED_PORTS", "")
-	if raw == "" {
+	// "none" is what the docs and the standard compose file say; treat it
+	// (and no value) as TCP tunneling disabled instead of a startup error.
+	if raw == "" || raw == "none" {
 		return 0, 0, nil
 	}
 

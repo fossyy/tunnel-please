@@ -84,12 +84,13 @@ func (hh *httpHandler) Handler(conn net.Conn, isTLS bool) {
 	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	br := bufio.NewReaderSize(conn, hh.config.HeaderSize())
 	headerBuf, err := readHTTPHeader(br, hh.config.HeaderSize())
+	// Clear it before writing anything: badRequest/redirect/forward must not
+	// inherit an expired deadline.
+	_ = conn.SetReadDeadline(time.Time{})
 	if err != nil {
 		_ = hh.badRequest(conn)
 		return
 	}
-
-	_ = conn.SetReadDeadline(time.Time{})
 
 	reqhf, err := header.NewRequest(headerBuf)
 	if err != nil {
@@ -122,7 +123,7 @@ func (hh *httpHandler) Handler(conn net.Conn, isTLS bool) {
 		return
 	}
 
-	hw := stream.New(conn, br, conn.RemoteAddr())
+	hw := stream.New(conn, br, conn.RemoteAddr(), hh.config.HeaderSize())
 	defer func(hw stream.HTTP) {
 		err = hw.Close()
 		if err != nil {
@@ -140,6 +141,12 @@ func (hh *httpHandler) closeConnection(conn net.Conn) {
 }
 
 func (hh *httpHandler) extractSlug(reqhf header.RequestHeader) (string, error) {
+	// One Host field only (RFC 7230 5.4): different proxies may route a
+	// repeated header to different tunnels than the one we picked.
+	if reqhf.Count("Host") != 1 {
+		return "", errors.New("missing or repeated host")
+	}
+
 	host := strings.Split(reqhf.Value("Host"), ".")
 	if len(host) <= 1 {
 		return "", errors.New("invalid host")

@@ -6,10 +6,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"tunnel_pls/internal/http/header"
 )
 
 type mockRequestHeader struct {
 	mock.Mock
+}
+
+func (m *mockRequestHeader) Count(key string) int {
+	return m.Called(key).Int(0)
 }
 
 func (m *mockRequestHeader) Value(key string) string {
@@ -79,6 +85,8 @@ func TestForwardedFor_HandleRequest(t *testing.T) {
 			reqHeader := new(mockRequestHeader)
 
 			if !tc.expectError {
+				// A client-sent value must not survive next to ours.
+				reqHeader.On("Remove", "X-Forwarded-For").Return()
 				reqHeader.On("Set", "X-Forwarded-For", tc.expectedHost).Return()
 			}
 
@@ -123,4 +131,19 @@ func TestNewForwardedFor(t *testing.T) {
 			assert.Equal(t, tc.expectAddr.String(), ff.addr.String())
 		})
 	}
+}
+
+// A client-sent X-Forwarded-For must not survive next to the real address:
+// the parser keeps repeated fields, so Set alone would leave the second one.
+func TestForwardedForReplacesRepeatedHeader(t *testing.T) {
+	raw := []byte("GET / HTTP/1.1\r\nHost: a.example.com\r\n" +
+		"X-Forwarded-For: 1.1.1.1\r\nX-Forwarded-For: 6.6.6.6\r\n\r\n")
+	h, err := header.NewRequest(raw)
+	require.NoError(t, err)
+
+	ff := NewForwardedFor(&net.TCPAddr{IP: net.ParseIP("203.0.113.9"), Port: 1234})
+	require.NoError(t, ff.HandleRequest(h))
+
+	assert.Equal(t, 1, h.Count("X-Forwarded-For"))
+	assert.Equal(t, "203.0.113.9", h.Value("X-Forwarded-For"))
 }

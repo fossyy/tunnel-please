@@ -7,12 +7,8 @@ type ResponseHeader interface {
 	Finalize() []byte
 }
 
-type responseHeader struct {
-	startLine []byte
-	headers   map[string]string
-}
-
 type RequestHeader interface {
+	Count(key string) int
 	Value(key string) string
 	Set(key string, value string)
 	Remove(key string)
@@ -20,11 +16,4 @@ type RequestHeader interface {
 	Method() string
 	Path() string
 	Version() string
-}
-type requestHeader struct {
-	method    string
-	path      string
-	version   string
-	startLine []byte
-	headers   map[string]string
 }

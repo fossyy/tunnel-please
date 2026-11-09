@@ -30,7 +30,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          go test ./... -v -p 4 -coverprofile=coverage
+          go test ./... -v -p 4 -race -coverprofile=coverage
 
       - name: Run GolangCI-Lint Analysis
         uses: golangci/golangci-lint-action@v9

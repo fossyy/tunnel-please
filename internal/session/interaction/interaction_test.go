@@ -1891,14 +1891,17 @@ func TestInteraction_Start_Interactive(t *testing.T) {
 
 			time.Sleep(50 * time.Millisecond)
 
-			i := mockInteraction.(*interaction)
-			i.Stop()
-
+			// Start must finish before Stop: bubbletea's Program is not safe
+			// against a Kill during Run's initialisation, and production never
+			// stops an interaction from another goroutine.
 			select {
 			case <-done:
 			case <-time.After(2 * time.Second):
 				t.Fatal("Start() did not complete in time")
 			}
+
+			i := mockInteraction.(*interaction)
+			i.Stop()
 
 			assert.Equal(t, 1, closeCallCount, "close function should be called once")
 
@@ -1949,11 +1952,22 @@ func TestInteraction_Start_ProtocolSelection(t *testing.T) {
 			mockChannel.On("Write", mock.Anything).Return(0, nil).Maybe()
 			mockInteraction.SetChannel(mockChannel)
 
+			// Production never stops an interaction from another goroutine:
+			// the program exits when its channel closes and Start tears the
+			// program down itself. bubbletea's Program is not safe against a
+			// Kill during Run's initialisation, so let Start finish first.
+			done := make(chan struct{})
 			go func() {
+				defer close(done)
 				mockInteraction.Start()
 			}()
 
 			time.Sleep(50 * time.Millisecond)
+
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+			}
 
 			i := mockInteraction.(*interaction)
 			i.Stop()
@@ -2007,18 +2021,27 @@ func TestInteraction_Stop(t *testing.T) {
 				mockChannel.On("Write", mock.Anything).Return(0, nil).Maybe()
 				mockInteraction.SetChannel(mockChannel)
 
+				done := make(chan struct{})
 				go func() {
+					defer close(done)
 					mockInteraction.Start()
 				}()
 
 				time.Sleep(50 * time.Millisecond)
+
+				select {
+				case <-done:
+				case <-time.After(2 * time.Second):
+				}
 			}
 
 			assert.NotPanics(t, func() {
 				i.Stop()
 			})
 
+			i.programMu.Lock()
 			assert.Nil(t, i.program)
+			i.programMu.Unlock()
 
 			select {
 			case <-i.ctx.Done():
@@ -2052,15 +2075,29 @@ func TestInteraction_Start_CommandListSetup(t *testing.T) {
 	mockChannel.On("Write", mock.Anything).Return(0, nil)
 	mockInteraction.SetChannel(mockChannel)
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		mockInteraction.Start()
 	}()
 
 	time.Sleep(50 * time.Millisecond)
 
+	// Start must finish before Stop: bubbletea's Program is not safe against a
+	// Kill during Run's initialisation, and production never stops an
+	// interaction from another goroutine.
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+	}
+
 	i := mockInteraction.(*interaction)
 
-	assert.NotNil(t, i.program, "program should be initialized")
+	// Start writes i.program on another goroutine under programMu.
+	i.programMu.Lock()
+	programReady := i.program != nil
+	i.programMu.Unlock()
+	assert.True(t, programReady, "program should be initialized")
 
 	i.Stop()
 }
@@ -2087,11 +2124,20 @@ func TestInteraction_Start_TextInputSetup(t *testing.T) {
 	mockChannel.On("Write", mock.Anything).Return(0, nil).Maybe()
 	mockInteraction.SetChannel(mockChannel)
 
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		mockInteraction.Start()
 	}()
 
 	time.Sleep(50 * time.Millisecond)
+
+	// Start must finish before Stop: bubbletea's Program is not safe against a
+	// Kill during Run's initialisation.
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+	}
 
 	i := mockInteraction.(*interaction)
 	i.Stop()
@@ -2159,9 +2205,9 @@ func TestInteraction_Start_CleanupOnExit(t *testing.T) {
 
 			time.Sleep(50 * time.Millisecond)
 
-			i := mockInteraction.(*interaction)
-			i.Stop()
-
+			// Start must finish before Stop: bubbletea's Program is not safe
+			// against a Kill during Run's initialisation, and production never
+			// stops an interaction from another goroutine.
 			select {
 			case <-done:
 			case <-time.After(2 * time.Second):
@@ -2217,11 +2263,22 @@ func TestInteraction_Start_WithDifferentChannels(t *testing.T) {
 				mockInteraction.SetChannel(mockChannel)
 			}
 
+			// Production never stops an interaction from another goroutine:
+			// the program exits when its channel closes and Start tears the
+			// program down itself. bubbletea's Program is not safe against a
+			// Kill during Run's initialisation, so let Start finish first.
+			done := make(chan struct{})
 			go func() {
+				defer close(done)
 				mockInteraction.Start()
 			}()
 
 			time.Sleep(50 * time.Millisecond)
+
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+			}
 
 			i := mockInteraction.(*interaction)
 			i.Stop()
@@ -2281,7 +2338,9 @@ func TestInteraction_Stop_MultipleCallsSafe(t *testing.T) {
 		i.Stop()
 	})
 
+	i.programMu.Lock()
 	assert.Nil(t, i.program)
+	i.programMu.Unlock()
 }
 
 func TestInteraction_Start_HeadlessMode_NoOp(t *testing.T) {
@@ -2309,7 +2368,9 @@ func TestInteraction_Start_HeadlessMode_NoOp(t *testing.T) {
 	}
 
 	i := mockInteraction.(*interaction)
+	i.programMu.Lock()
 	assert.Nil(t, i.program, "program should not be created in headless mode")
+	i.programMu.Unlock()
 
 	mockConfig.AssertNotCalled(t, "Domain")
 	mockConfig.AssertNotCalled(t, "TLSEnabled")

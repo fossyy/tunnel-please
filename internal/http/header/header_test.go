@@ -2,6 +2,7 @@ package header
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -155,6 +156,29 @@ func TestNewResponse(t *testing.T) {
 	}
 }
 
+// 70 fields in both directions. A fixed 64-field cap used to refuse these
+// before any of the real rules were applied.
+func TestManyFieldsRoundTrip(t *testing.T) {
+	req, err := NewRequest(append([]byte("GET / HTTP/1.1\r\n"), manyHeaders(70)...))
+	if !assert.NoError(t, err) {
+		return
+	}
+	reqOut := string(req.Finalize())
+	for i := 0; i < 70; i++ {
+		assert.Equal(t, "v", req.Value(fmt.Sprintf("X-%02d", i)))
+		assert.Contains(t, reqOut, fmt.Sprintf("X-%02d: v\r\n", i))
+	}
+
+	resp, err := NewResponse(append([]byte("HTTP/1.1 200 OK\r\n"), manyHeaders(70)...))
+	if !assert.NoError(t, err) {
+		return
+	}
+	respOut := string(resp.Finalize())
+	for i := 0; i < 70; i++ {
+		assert.Contains(t, respOut, fmt.Sprintf("X-%02d: v\r\n", i))
+	}
+}
+
 func TestResponseHeaderMethods(t *testing.T) {
 	data := []byte("HTTP/1.1 200 OK\r\nServer: old\r\n\r\n")
 	resp, _ := NewResponse(data)
@@ -175,53 +199,132 @@ func TestResponseHeaderMethods(t *testing.T) {
 
 func TestSetRemainingHeaders(t *testing.T) {
 	tests := []struct {
-		name           string
-		data           []byte
-		initialHeaders map[string]string
-		expectHeaders  map[string]string
+		name       string
+		data       []byte
+		wantErr    bool
+		expectKept []field
 	}{
 		{
 			name: "various header formats",
-			data: []byte("K1: V1\r\nK2:V2\r\n K3 : V3 \r\nNoColon\r\n\r\n"),
-			expectHeaders: map[string]string{
-				"K1": "V1",
-				"K2": "V2",
-				"K3": "V3",
+			data: []byte("K1: V1\r\nK2:V2\r\nK3 : V3 \r\n\r\n"),
+			// "Name space: value" is refused thanks to K3, RFC 7230 3.2.4.
+			wantErr: true,
+		},
+		{
+			name: "OWS around value trimmed",
+			data: []byte("K1:  V1 \t\r\n\r\n"),
+			expectKept: []field{
+				{"K1", "V1"},
 			},
+		},
+		{
+			name:    "no colon line refused",
+			data:    []byte("NoColon\r\n\r\n"),
+			wantErr: true,
 		},
 		{
 			name: "no trailing CRLF",
 			data: []byte("K1: V1"),
-			expectHeaders: map[string]string{
-				"K1": "V1",
+			expectKept: []field{
+				{"K1", "V1"},
 			},
 		},
 		{
-			name:          "empty lines",
-			data:          []byte("\r\nK1: V1"),
-			expectHeaders: map[string]string{},
+			name:       "empty lines",
+			data:       []byte("\r\nK1: V1"),
+			expectKept: nil,
 		},
 		{
-			name: "headers with only colon",
-			data: []byte(": value\r\nkey:\r\n"),
-			expectHeaders: map[string]string{
-				"":    "value",
-				"key": "",
+			name:    "empty name refused",
+			data:    []byte(": value\r\n\r\n"),
+			wantErr: true,
+		},
+		{
+			name: "empty value allowed",
+			data: []byte("key:\r\n\r\n"),
+			expectKept: []field{
+				{"key", ""},
 			},
+		},
+		{
+			name:    "space before colon refused",
+			data:    []byte("Host : a\r\n\r\n"),
+			wantErr: true,
+		},
+		{
+			name:    "tab before colon refused",
+			data:    []byte("Host\t: a\r\n\r\n"),
+			wantErr: true,
+		},
+		{
+			name:    "obs-fold refused",
+			data:    []byte("A: one\r\n two\r\n\r\n"),
+			wantErr: true,
+		},
+		{
+			name:    "bare CR in value refused",
+			data:    []byte("A: v\rl\r\n\r\n"),
+			wantErr: true,
+		},
+		{
+			name:    "bare LF in value refused",
+			data:    []byte("A: v\nl\r\n\r\n"),
+			wantErr: true,
+		},
+		{
+			name:    "NUL in value refused",
+			data:    []byte("A: v\x00l\r\n\r\n"),
+			wantErr: true,
+		},
+		{
+			name:    "non-token name refused",
+			data:    []byte("A@B: v\r\n\r\n"),
+			wantErr: true,
+		},
+		{
+			// No fixed field limit: 70 Set-Cookie lines are a real response,
+			// not an attack. The byte limit is the bound.
+			name:       "many fields kept",
+			data:       manyHeaders(70),
+			expectKept: fieldsFromHeaders(70),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := &requestHeader{headers: make(map[string]string)}
-			if tt.initialHeaders != nil {
-				req.headers = tt.initialHeaders
+			list, err := parseLines(nil, tt.data)
+			if tt.wantErr {
+				assert.ErrorIs(t, err, ErrMalformedField)
+				return
 			}
-			setRemainingHeaders(tt.data, req)
-			assert.Equal(t, len(tt.expectHeaders), len(req.headers))
-			for k, v := range tt.expectHeaders {
-				assert.Equal(t, v, req.headers[k])
+
+			assert.NoError(t, err)
+
+			if tt.expectKept != nil {
+				assert.Equal(t, tt.expectKept, list)
+				return
 			}
+
+			assert.Nil(t, list)
 		})
 	}
+}
+
+// manyHeaders builds n "X-NN: v" lines then the blank line, with text/template
+// out of the loop: a plain fmt format keeps the generator obvious.
+func manyHeaders(n int) []byte {
+	var b bytes.Buffer
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "X-%02d: v\r\n", i)
+	}
+	b.WriteString("\r\n")
+	return b.Bytes()
+}
+
+func fieldsFromHeaders(n int) []field {
+	list := make([]field, 0, n)
+	for i := 0; i < n; i++ {
+		list = append(list, field{name: fmt.Sprintf("X-%02d", i), value: "v"})
+	}
+	return list
 }

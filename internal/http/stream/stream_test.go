@@ -3,10 +3,12 @@ package stream
 import (
 	"bytes"
 	"io"
+	"net"
 	"strings"
 	"testing"
 
 	"tunnel_pls/internal/http/header"
+	"tunnel_pls/internal/middleware"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -153,7 +155,7 @@ func TestHTTPMethods(t *testing.T) {
 	addr.On("String").Return("1.2.3.4:1234")
 
 	rw := new(MockReadWriter)
-	hs := New(rw, rw, addr)
+	hs := New(rw, rw, addr, 4096)
 
 	assert.Equal(t, addr, hs.RemoteAddr())
 
@@ -244,7 +246,7 @@ func TestApplyMiddlewares(t *testing.T) {
 			addr.On("String").Return("1.2.3.4:1234")
 
 			rw := new(MockReadWriter)
-			hs := New(rw, rw, addr)
+			hs := New(rw, rw, addr, 4096)
 
 			reqMW := new(MockRequestMiddleware)
 			respMW := new(MockResponseMiddleware)
@@ -335,7 +337,7 @@ func TestCloseMethods(t *testing.T) {
 			addr.On("String").Return("1.2.3.4:1234")
 
 			w, r := tt.setup()
-			hs := New(w, r, addr)
+			hs := New(w, r, addr, 4096)
 
 			assert.NotPanics(t, func() {
 				err := tt.op(hs)
@@ -414,6 +416,21 @@ func TestIsHTTPHeader(t *testing.T) {
 			expect: false,
 		},
 		{
+			name:   "obs-fold line",
+			buf:    []byte("GET / HTTP/1.1\r\nX-A: one\r\n two\r\n\r\n"),
+			expect: false,
+		},
+		{
+			name:   "space before colon",
+			buf:    []byte("GET / HTTP/1.1\r\nX-A : one\r\n\r\n"),
+			expect: false,
+		},
+		{
+			name:   "bare CR in value",
+			buf:    []byte("GET / HTTP/1.1\r\nX-A: v\rl\r\n\r\n"),
+			expect: false,
+		},
+		{
 			name:   "empty header section",
 			buf:    []byte("GET / HTTP/1.1\r\n\r\n"),
 			expect: true,
@@ -433,109 +450,114 @@ func TestIsHTTPHeader(t *testing.T) {
 	}
 }
 
-func TestRead(t *testing.T) {
-	tests := []struct {
-		name          string
-		input         []byte
-		readLen       int
-		expectContent string
-		expectRead    int
-		expectErr     bool
-		middlewareErr error
-		isHTTP        bool
-	}{
-		{
-			name:          "valid http request",
-			input:         []byte("GET / HTTP/1.1\r\nHost: test\r\n\r\nBody"),
-			readLen:       100,
-			expectContent: "Body",
-			expectRead:    54,
-			isHTTP:        true,
-		},
-		{
-			name:          "non-http data",
-			input:         []byte("Some random data\r\n\r\nMore data"),
-			readLen:       100,
-			expectContent: "Some random data\r\n\r\nMore data",
-			expectRead:    29,
-			isHTTP:        false,
-		},
-		{
-			name:          "no delimiter",
-			input:         []byte("Partial data without delimiter"),
-			readLen:       100,
-			expectContent: "Partial data without delimiter",
-			expectRead:    30,
-			isHTTP:        false,
-		},
-		{
-			name:          "middleware error",
-			input:         []byte("GET / HTTP/1.1\r\nHost: test\r\n\r\n"),
-			readLen:       100,
-			middlewareErr: assert.AnError,
-			expectErr:     true,
-			isHTTP:        true,
-		},
-	}
+// requestCase is one input for TestStreamRead: what the client sends, and what
+// Read must hand out in the end.
+type requestCase struct {
+	name          string
+	input         []byte
+	want          string
+	middleware    bool
+	middlewareErr error
+}
 
-	for _, tt := range tests {
+var readCases = []requestCase{
+	{
+		name:       "valid http request",
+		input:      []byte("GET / HTTP/1.1\r\nHost: test\r\n\r\nBody"),
+		want:       "GET / HTTP/1.1\r\nHost: test\r\nX-Middleware: true\r\n\r\nBody",
+		middleware: true,
+	},
+	{
+		// The rewrite adds bytes, so a full caller buffer cannot take it all:
+		// the rest has to come out on the next Read, never more than len(p).
+		name:       "rewritten request larger than a full buffer",
+		input:      []byte("GET / HTTP/1.1\r\nHost: a.example.com\r\n\r\n" + strings.Repeat("x", 63000)),
+		want:       "GET / HTTP/1.1\r\nHost: a.example.com\r\nX-Middleware: true\r\n\r\n" + strings.Repeat("x", 63000),
+		middleware: true,
+	},
+	{
+		// A header that arrives in pieces still gets the header added. Fewer
+		// than 64 fields: the parser caps those.
+		name:       "header split across reads",
+		input:      []byte("GET / HTTP/1.1\r\n" + strings.Repeat("X-Pad: "+strings.Repeat("a", 200)+"\r\n", 10) + "\r\nBody"),
+		want:       "GET / HTTP/1.1\r\n" + strings.Repeat("X-Pad: "+strings.Repeat("a", 200)+"\r\n", 10) + "X-Middleware: true\r\n\r\nBody",
+		middleware: true,
+	},
+	{
+		name:  "non-http data",
+		input: []byte("Some random data\r\n\r\nMore data"),
+		want:  "Some random data\r\n\r\nMore data",
+	},
+	{
+		name:  "no delimiter",
+		input: []byte("Partial data without delimiter"),
+		want:  "Partial data without delimiter",
+	},
+	{
+		name:  "malformed block passes through untouched",
+		input: []byte("GET / HTTP/1.1\r\nHost: test\r\nNoColon\r\n\r\n"),
+		want:  "GET / HTTP/1.1\r\nHost: test\r\nNoColon\r\n\r\n",
+	},
+	{
+		name:  "plain body passes through",
+		input: []byte("GET / HTTP/1.1\r\nno colon here\r\n\r\n"),
+		want:  "GET / HTTP/1.1\r\nno colon here\r\n\r\n",
+	},
+	{
+		name:          "middleware error",
+		input:         []byte("GET / HTTP/1.1\r\nHost: test\r\n\r\n"),
+		middlewareErr: assert.AnError,
+	},
+}
+
+// TestStreamRead reads each case with several buffer sizes. The bytes handed
+// out must always be the same, and never more than the buffer.
+func TestStreamRead(t *testing.T) {
+	for _, tt := range readCases {
 		t.Run(tt.name, func(t *testing.T) {
-			addr := new(MockAddr)
-			addr.On("String").Return("1.2.3.4:1234")
+			for _, size := range []int{1, 7, 64, 4096, 32768} {
+				addr := new(MockAddr)
+				addr.On("String").Return("1.2.3.4:1234")
+				hs := New(io.Discard, bytes.NewReader(tt.input), addr, 4096)
 
-			reader := new(MockReader)
-			writer := new(MockWriterOnly)
+				var reqMW *MockRequestMiddleware
+				if tt.middleware || tt.middlewareErr != nil {
+					reqMW = new(MockRequestMiddleware)
+					if tt.middlewareErr != nil {
+						reqMW.On("HandleRequest", mock.Anything).Return(tt.middlewareErr)
+					} else {
+						reqMW.On("HandleRequest", mock.Anything).Run(func(args mock.Arguments) {
+							h := args.Get(0).(header.RequestHeader)
+							h.Set("X-Middleware", "true")
+						}).Return(nil)
+					}
+					hs.UseRequestMiddleware(reqMW)
+				}
 
-			if tt.expectErr || tt.name == "valid http request" {
-				reader.On("Read", mock.Anything).Run(func(args mock.Arguments) {
-					p := args.Get(0).([]byte)
-					copy(p, tt.input)
-				}).Return(len(tt.input), io.EOF).Once()
-			} else {
-				reader.On("Read", mock.Anything).Run(func(args mock.Arguments) {
-					p := args.Get(0).([]byte)
-					copy(p, tt.input)
-				}).Return(len(tt.input), nil).Once()
-			}
+				var got []byte
+				var readErr error
+				p := make([]byte, size)
+				for i := 0; i < 100000; i++ {
+					n, err := hs.Read(p)
+					// Never more than the buffer: io.Copy panics on that.
+					assert.LessOrEqual(t, n, size)
+					got = append(got, p[:n]...)
+					if err != nil {
+						readErr = err
+						break
+					}
+				}
 
-			hs := New(writer, reader, addr)
-
-			reqMW := new(MockRequestMiddleware)
-			if tt.isHTTP {
 				if tt.middlewareErr != nil {
-					reqMW.On("HandleRequest", mock.Anything).Return(tt.middlewareErr)
+					assert.Error(t, readErr)
 				} else {
-					reqMW.On("HandleRequest", mock.Anything).Run(func(args mock.Arguments) {
-						h := args.Get(0).(header.RequestHeader)
-						h.Set("X-Middleware", "true")
-					}).Return(nil)
+					assert.Equal(t, tt.want, string(got), "buffer size %d", size)
+					assert.ErrorIs(t, readErr, io.EOF)
+				}
+				if reqMW != nil {
+					reqMW.AssertExpectations(t)
 				}
 			}
-			hs.UseRequestMiddleware(reqMW)
-
-			p := make([]byte, tt.readLen)
-			n, err := hs.Read(p)
-
-			if tt.expectErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expectRead, n)
-				if tt.name == "valid http request" {
-					content := string(p[:n])
-					assert.Contains(t, content, "GET / HTTP/1.1\r\n")
-					assert.Contains(t, content, "Host: test\r\n")
-					assert.Contains(t, content, "X-Middleware: true\r\n")
-					assert.True(t, bytes.HasSuffix(p[:n], []byte("\r\n\r\nBody")))
-				} else {
-					assert.Equal(t, tt.expectContent, string(p[:n]))
-				}
-			}
-
-			if tt.isHTTP {
-				reqMW.AssertExpectations(t)
-			}
-			reader.AssertExpectations(t)
 		})
 	}
 }
@@ -612,7 +634,7 @@ func TestWrite(t *testing.T) {
 			}, nil)
 
 			reader := new(MockReader)
-			hs := New(writer, reader, addr)
+			hs := New(writer, reader, addr, 4096)
 
 			respMW := new(MockResponseMiddleware)
 			if tt.isHTTP {
@@ -710,7 +732,7 @@ func TestWriteErrors(t *testing.T) {
 			addr.On("String").Return("1.2.3.4:1234")
 
 			w, r := tt.setup()
-			hs := New(w, r, addr)
+			hs := New(w, r, addr, 4096)
 
 			_, err := hs.Write(tt.data)
 			assert.Error(t, err)
@@ -729,13 +751,15 @@ func TestReadEOF(t *testing.T) {
 		expectContent string
 	}{
 		{
+			// Read hands out what it took before the error, and the error on
+			// the next call -- the io.Reader contract.
 			name: "read eof",
 			setup: func() io.Reader {
 				reader := new(MockReader)
 				reader.On("Read", mock.Anything).Run(func(args mock.Arguments) {
 					p := args.Get(0).([]byte)
 					copy(p, "data")
-				}).Return(4, io.EOF)
+				}).Return(4, io.EOF).Once()
 				return reader
 			},
 			expectN:       4,
@@ -750,7 +774,7 @@ func TestReadEOF(t *testing.T) {
 			addr.On("String").Return("1.2.3.4:1234")
 
 			reader := tt.setup()
-			hs := New(nil, reader, addr)
+			hs := New(nil, reader, addr, 4096)
 
 			p := make([]byte, 100)
 			n, err := hs.Read(p)
@@ -761,5 +785,63 @@ func TestReadEOF(t *testing.T) {
 
 			reader.(*MockReader).AssertExpectations(t)
 		})
+	}
+}
+
+type discardWriter struct{}
+
+func (discardWriter) Write(p []byte) (int, error) { return len(p), nil }
+func (discardWriter) Close() error                { return nil }
+
+type emptyReader struct{}
+
+func (emptyReader) Read(p []byte) (int, error) { return 0, io.EOF }
+
+// A response shape the tunnel actually forwards: a few headers, short body.
+func benchResponse() []byte {
+	return []byte("HTTP/1.1 200 OK\r\n" +
+		"Content-Type: application/json\r\n" +
+		"Content-Length: 3\r\n" +
+		"Connection: keep-alive\r\n" +
+		"Date: Tue, 10 Nov 2026 00:00:00 GMT\r\n" +
+		"Server: upstream\r\n" +
+		"\r\nabc")
+}
+
+func benchAddr() net.Addr {
+	a, _ := net.ResolveTCPAddr("tcp", "1.2.3.4:1234")
+	return a
+}
+
+// One response header parsed and rewritten: the cost per tunneled response.
+func BenchmarkNewResponse(b *testing.B) {
+	in := benchResponse()
+	frame := in[:bytes.Index(in, DELIMITER)+len(DELIMITER)]
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(frame)))
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		if _, err := header.NewResponse(frame); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// End-to-end: stream.Write parses, runs middleware wiped and emits one response.
+func BenchmarkStreamWriteOneResponse(b *testing.B) {
+	in := benchResponse()
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(in)))
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		hs := New(discardWriter{}, emptyReader{}, benchAddr(), 4096)
+		hs.UseResponseMiddleware(middleware.NewTunnelFingerprint())
+		if _, err := hs.Write(in); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

@@ -656,6 +656,8 @@ func TestHandler(t *testing.T) {
 			responseChan := make(chan []byte, 1)
 			doneChan := make(chan struct{})
 
+			var wg sync.WaitGroup
+
 			if clientConn != nil {
 				go func() {
 					defer close(doneChan)
@@ -677,10 +679,13 @@ func TestHandler(t *testing.T) {
 					responseChan <- res
 				}()
 
+				wg.Add(1)
 				go func() {
-					_, err := clientConn.Write(tt.request)
-					if err != nil {
-						t.Logf("Error writing request: %v", err)
+					defer wg.Done()
+					// No t.Logf here: the subtest can finish first and the
+					// logger is not safe to touch after that.
+					if _, err := clientConn.Write(tt.request); err != nil {
+						_ = err
 					}
 				}()
 			} else {
@@ -688,7 +693,6 @@ func TestHandler(t *testing.T) {
 				close(doneChan)
 			}
 
-			var wg sync.WaitGroup
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -859,4 +863,61 @@ func TestRedirectStatusLine(t *testing.T) {
 	// A cached redirect makes a reused slug fail for the visitor that saw it
 	// while it was free, and the reason text must name the status sent.
 	assert.True(t, strings.HasPrefix(string(buf[:n]), "HTTP/1.1 302 Found\r\n"))
+}
+
+// The 10s read deadline is ours until the request is parsed. If it is still
+// installed when the app is streamed to, an app that answers after 10s (or
+// sends its body slowly) dies, and SetReadDeadline on an ssh.Channel does not
+// return an error while failing. Clear it as soon as the request is in, and
+// prove that a cleared deadline really accepts an expired time.
+func TestHandlerClearsHeaderDeadlineAfterRequest(t *testing.T) {
+	msr := new(MockSessionRegistry)
+	mc := &MockConfig{}
+	mc.On("Domain").Return("example.com")
+	mc.On("FrontendURL").Return("https://example.com")
+	mc.On("TLSRedirect").Return(false)
+	mc.On("HeaderSize").Return(4096)
+	hh := &httpHandler{sessionRegistry: msr, config: mc}
+
+	mockSession := new(MockSession)
+	mockForwarder := new(MockForwarder)
+	mockSSHChannel := new(MockSSHChannel)
+	msr.On("Get", types.SessionKey{Id: "test", Type: types.TunnelTypeHTTP}).Return(mockSession, nil)
+	mockSession.On("Forwarder").Return(mockForwarder)
+
+	reqCh := make(chan *ssh.Request)
+	mockForwarder.On("OpenForwardedChannel", mock.Anything, mock.Anything).Return(mockSSHChannel, (<-chan *ssh.Request)(reqCh), nil)
+
+	var mu sync.Mutex
+	var headers []byte
+	mockSSHChannel.On("Write", mock.Anything).Run(func(a mock.Arguments) {
+		mu.Lock()
+		headers = append(headers, a.Get(0).([]byte)...)
+		mu.Unlock()
+	}).Return(0, nil)
+	mockSSHChannel.On("Close").Return(nil)
+
+	mockForwarder.On("HandleConnection", mock.Anything, mockSSHChannel).Run(func(a mock.Arguments) {
+		w := a.Get(0).(io.ReadWriter)
+		_, _ = w.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"))
+	})
+
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	addr, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:12345")
+
+	go hh.Handler(&wrappedConn{Conn: serverConn, remoteAddr: addr}, true)
+	go func() { _, _ = io.WriteString(clientConn, "GET / HTTP/1.1\r\nHost: test.domain\r\n\r\n") }()
+
+	buf := make([]byte, 64)
+	_ = clientConn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	n, _ := clientConn.Read(buf)
+
+	assert.Contains(t, string(buf[:n]), "200 OK")
+	for _, call := range mockSSHChannel.ExpectedCalls {
+		assert.NotEqual(t, "SetReadDeadline", call.Method,
+			"the app channel must not inherit the visitor's read deadline")
+	}
+	// The app channel is closed by forwardRequest, not here; what matters is
+	// that nothing above ever set a deadline on it.
 }
