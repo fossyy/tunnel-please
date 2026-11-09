@@ -53,6 +53,8 @@ type interaction struct {
 	cancel          context.CancelFunc
 	mode            types.InteractiveMode
 	programMu       sync.Mutex
+	sizeMu          sync.Mutex
+	sizeW, sizeH    int
 }
 
 func (i *interaction) SetMode(m types.InteractiveMode) {
@@ -71,6 +73,10 @@ func (i *interaction) Send(message string) error {
 	return nil
 }
 func (i *interaction) SetWH(w, h int) {
+	i.sizeMu.Lock()
+	i.sizeW, i.sizeH = w, h
+	i.sizeMu.Unlock()
+
 	if i.program != nil {
 		i.program.Send(tea.WindowSizeMsg{
 			Width:  w,
@@ -199,6 +205,21 @@ func (m *model) viewContent() string {
 	return m.dashboardView()
 }
 
+// Default size used until the SSH client reports its pty size.
+const (
+	defaultWidth  = 80
+	defaultHeight = 24
+)
+
+func (i *interaction) wh() (int, int) {
+	i.sizeMu.Lock()
+	defer i.sizeMu.Unlock()
+	if i.sizeW > 0 && i.sizeH > 0 {
+		return i.sizeW, i.sizeH
+	}
+	return defaultWidth, defaultHeight
+}
+
 func (i *interaction) Start() {
 	if i.mode == types.InteractiveModeHEADLESS {
 		return
@@ -258,11 +279,13 @@ func (i *interaction) Start() {
 		help: help.New(),
 	}
 
+	w, h := i.wh()
 	i.programMu.Lock()
 	i.program = tea.NewProgram(
 		m,
 		tea.WithInput(i.channel),
 		tea.WithOutput(i.channel),
+		tea.WithWindowSize(w, h),
 		tea.WithColorProfile(colorprofile.TrueColor),
 		tea.WithoutSignals(),
 		tea.WithoutSignalHandler(),
