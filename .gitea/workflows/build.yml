@@ -39,24 +39,6 @@ jobs:
 
       - name: Run tests
         run: go test -v -p 4 -race ./...
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Smoke build (linux/arm64)
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/arm64
-          push: false
-          build-args: |
-            VERSION=ci-smoke
-            BUILD_DATE=${{ gitea.event.run.created_at }}
-            COMMIT=${{ gitea.sha }}
   build:
     name: Build ${{ matrix.platform }} image
     runs-on: ubuntu-latest
@@ -209,7 +191,7 @@ jobs:
               args+=(--tag "$tag")
             fi
           done <<< "$TAGS"
-          for digest in *; do
-            args+=("${IMAGE}@sha256:${digest}")
+          for digest in */*; do
+            args+=("${IMAGE}@sha256:${digest##*/}")
           done
           docker buildx imagetools create "${args[@]}"
